@@ -6,9 +6,9 @@ import sys
 
 from helpers import make_runtime, run
 
-from basic_core import ReplSession, RunState, WaitFrames
+from py_basic_core import ReplSession, RunState, WaitFrames
 
-CORE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CORE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "py_basic_core")
 
 
 def test_register_function_and_command():
@@ -86,7 +86,7 @@ def test_direct_mode_rejects_function_and_program_rejects_exit():
 def test_core_uses_only_the_standard_library():
     """No Pyxel, no outside libraries: every import is relative or from the standard library."""
     for dirpath, dirnames, files in os.walk(CORE_DIR):
-        dirnames[:] = [d for d in dirnames if d not in ("tests", "__pycache__")]
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
         for f in files:
             if not f.endswith(".py"):
                 continue

@@ -1,8 +1,8 @@
 """BASIC language core (DESIGN.md 1).
 
-Pure Python with no outside libraries. All imports inside the package are
-relative, so it works under any folder name (for example as ``basic.core``
-inside a front end, or on its own).
+Pure Python with no outside libraries. Import it as ``py_basic_core`` (put
+the repository folder on ``sys.path``). All imports inside the package are
+relative.
 """
 
 from .errors import BasicError, BasicRuntimeError, BasicSyntaxError

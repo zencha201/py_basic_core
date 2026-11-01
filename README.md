@@ -17,11 +17,18 @@
 
 ## 使い方
 
-このフォルダを、ほかのプロジェクトの中に好きな名前で置いて import します（パッケージ内はすべて相対 import です）。
-以下は `basic_core` という名前で置いた場合の例です。
+パッケージは `py_basic_core/` フォルダです。リポジトリを取得し、そのフォルダ（`py_basic_core/` の 1 つ上）を `sys.path` に入れて import します。
+ほかのリポジトリから使う場合は、git のサブモジュールとして取り込むと更新を追いやすくなります。
+
+```sh
+git clone https://github.com/zencha201/py_basic_core.git
+```
 
 ```python
-from basic_core import BufferHost, Runtime, RunState, install_standard
+import sys
+sys.path.insert(0, "py_basic_core")     # 取得したリポジトリのフォルダ
+
+from py_basic_core import BufferHost, Runtime, RunState, install_standard
 
 host = BufferHost()                 # PRINT の出力を文字列にためる
 runtime = Runtime(host)
@@ -46,18 +53,20 @@ print(host.output)                  # NAME? HELLO, TARO42
 
 | パス | 内容 |
 |---|---|
-| `lexer.py` `parser.py` `nodes.py` `compiler.py` `instructions.py` `runtime.py` | 字句解析 → 構文解析 → 命令列 → 実行 |
-| `values.py` `variable.py` `function.py` `registry.py` `host.py` `errors.py` `tokens.py` | 型・変数・関数・拡張の登録表・出力先・エラー・予約語 |
-| `repl.py` | ダイレクト実行 |
-| `stdlib/` | 標準関数 |
-| `terminal/` | 文字画面のモデル |
+| `py_basic_core/` | パッケージ |
+| `py_basic_core/lexer.py` `parser.py` `nodes.py` `compiler.py` `instructions.py` `runtime.py` | 字句解析 → 構文解析 → 命令列 → 実行 |
+| `py_basic_core/values.py` `variable.py` `function.py` `registry.py` `host.py` `errors.py` `tokens.py` | 型・変数・関数・拡張の登録表・出力先・エラー・予約語 |
+| `py_basic_core/repl.py` | ダイレクト実行 |
+| `py_basic_core/stdlib/` | 標準関数 |
+| `py_basic_core/terminal/` | 文字画面のモデル |
 | `tests/` | テスト |
+| `BASIC.md` / `DESIGN.md` | 言語仕様 / 設計 |
 
 ## テスト
 
 ```sh
 pip install pytest
-python -m pytest        # このフォルダで実行
+python -m pytest        # リポジトリのフォルダで実行
 ```
 
 ## ライセンス

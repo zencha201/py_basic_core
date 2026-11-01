@@ -3,7 +3,7 @@
 import pytest
 from helpers import error_of, run
 
-from basic_core import BasicRuntimeError, BasicSyntaxError
+from py_basic_core import BasicRuntimeError, BasicSyntaxError
 
 
 def test_print_and_expressions():

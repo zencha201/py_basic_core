@@ -1,6 +1,6 @@
 """Run BASIC source with the core only (no Pyxel)."""
 
-from basic_core import BufferHost, Runtime, RunState, install_standard
+from py_basic_core import BufferHost, Runtime, RunState, install_standard
 
 
 def make_runtime():

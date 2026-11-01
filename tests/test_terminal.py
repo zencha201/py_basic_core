@@ -1,4 +1,4 @@
-from basic_core.terminal import LineEditor, TerminalBuffer
+from py_basic_core.terminal import LineEditor, TerminalBuffer
 
 
 def test_wrap_and_scroll():

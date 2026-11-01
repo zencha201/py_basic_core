@@ -12,28 +12,29 @@
 - 文字列で与えた BASIC プログラムを解析・実行する。画面・キーボード・ファイルには触れず、出力は Host（8）へ、入力は実行状態（6）として外へ知らせる。
 - **依存の規則**
   - import するのは、パッケージ内のモジュール（相対 import）と Python の標準ライブラリだけ。自動テストで検査する（`tests/test_runtime.py`）。
-  - パッケージ内はすべて相対 import にしているので、どのフォルダ名で置いても動く（例: フロントエンドの中の `basic/core`）。
-  - 標準ライブラリと同じ名前のモジュールを作らない（パッケージのフォルダ自体が `sys.path` に入っても標準ライブラリを隠さないように。AST は `nodes.py`、命令は `instructions.py`）。
+  - パッケージ名は `py_basic_core`。使う側は、リポジトリのフォルダ（`py_basic_core/` の 1 つ上）を `sys.path` に入れて `import py_basic_core` とする。パッケージ内はすべて相対 import。
+  - 標準ライブラリと同じ名前のモジュールを作らない（AST は `nodes.py`、命令は `instructions.py`）。誤ってパッケージのフォルダ自体が `sys.path` に入っても標準ライブラリを隠さないため。
 
 ```
-（パッケージのフォルダ）
-├── __init__.py         公開 API（Runtime, RunState, ReplSession, BufferHost, install_standard, エラー）
-├── errors.py           BasicError / BasicSyntaxError / BasicRuntimeError とエラー名
-├── tokens.py           トークン種別・予約語
-├── lexer.py            字句解析
-├── nodes.py            AST ノード
-├── parser.py           構文解析（ブロックの対応を検査）
-├── compiler.py         AST → 命令列（ラベル解決・関数の事前登録・GLOBAL・DATA の収集）
-├── instructions.py     命令の定義（Instruction, CodeUnit）
-├── values.py           型（INT / STRING）の判定・検査・既定値
-├── variable.py         Scope（変数・配列・DICT）、BasicArray、BasicDict
-├── function.py         UserFunction / BuiltinFunction / CommandSpec / CallContext / WaitFrames
-├── registry.py         命令・関数の登録表
-├── host.py             Host インターフェースと BufferHost
-├── runtime.py          Runtime（VM・実行状態・中断・公開 API）
-├── repl.py             ReplSession（ダイレクト実行）
-├── stdlib/             標準関数・標準命令（11）
-├── terminal/           文字画面のモデル（11）
+（リポジトリ）
+├── py_basic_core/          パッケージ
+│   ├── __init__.py         公開 API（Runtime, RunState, ReplSession, BufferHost, install_standard, エラー）
+│   ├── errors.py           BasicError / BasicSyntaxError / BasicRuntimeError とエラー名
+│   ├── tokens.py           トークン種別・予約語
+│   ├── lexer.py            字句解析
+│   ├── nodes.py            AST ノード
+│   ├── parser.py           構文解析（ブロックの対応を検査）
+│   ├── compiler.py         AST → 命令列（ラベル解決・関数の事前登録・GLOBAL・DATA の収集）
+│   ├── instructions.py     命令の定義（Instruction, CodeUnit）
+│   ├── values.py           型（INT / STRING）の判定・検査・既定値
+│   ├── variable.py         Scope（変数・配列・DICT）、BasicArray、BasicDict
+│   ├── function.py         UserFunction / BuiltinFunction / CommandSpec / CallContext / WaitFrames
+│   ├── registry.py         命令・関数の登録表
+│   ├── host.py             Host インターフェースと BufferHost
+│   ├── runtime.py          Runtime（VM・実行状態・中断・公開 API）
+│   ├── repl.py             ReplSession（ダイレクト実行）
+│   ├── stdlib/             標準関数・標準命令（11）
+│   └── terminal/           文字画面のモデル（11）
 ├── tests/              pytest
 ├── BASIC.md / DESIGN.md / README.md / LICENSE
 └── pytest.ini
@@ -176,5 +177,5 @@ class Host(Protocol):
 - 変数はセッション中保持する（`load_direct()` は変数を初期化しない）。
 
 ## 13. テスト
-- `tests/` を pytest で実行する（このフォルダで `python -m pytest`）。`tests/conftest.py` がフォルダ名に関係なく本パッケージを `basic_core` として読み込む。
+- `tests/` を pytest で実行する（リポジトリのフォルダで `python -m pytest`）。`tests/conftest.py` がリポジトリのフォルダを `sys.path` に入れ、`py_basic_core` を import できるようにする。
 - `test_language.py`: 言語仕様（BASIC.md の例を含む）。`test_runtime.py`: 拡張 API・中断と再開・WAIT・ダイレクト実行・依存の規則。`test_terminal.py`: 文字画面のモデル。
