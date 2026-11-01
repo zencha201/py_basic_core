@@ -104,6 +104,18 @@ def key_function(ctx, args):
     return ctx.expect_dict(args[0]).key_at(ctx.expect_int(args[1]))
 
 
+def err_function(ctx, args):
+    """ERR$(): name of the error caught by ON ERROR ("" before any)."""
+    error = ctx.runtime.last_error
+    return error.name if error is not None else ""
+
+
+def erl_function(ctx, args):
+    """ERL(): source line of the error caught by ON ERROR (0 before any)."""
+    error = ctx.runtime.last_error
+    return error.line or 0 if error is not None else 0
+
+
 FUNCTIONS = (
     # name, function, min args, max args
     ("ABS", abs_function, 1, 1),
@@ -122,6 +134,8 @@ FUNCTIONS = (
     ("HASKEY", haskey_function, 2, 2),
     ("COUNT", count_function, 1, 1),
     ("KEY$", key_function, 2, 2),
+    ("ERR$", err_function, 0, 0),
+    ("ERL", erl_function, 0, 0),
 )
 
 

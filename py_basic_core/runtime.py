@@ -7,6 +7,7 @@ on the following frames.
 """
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from . import instructions as C
 from .compiler import compile_program
@@ -59,6 +60,12 @@ class Frame:
     stack_base: int = 0
     gosub_stack: list = field(default_factory=list)
     loops: list = field(default_factory=list)
+    # ON ERROR (BASIC.md 4.16): where to go, by GOTO or GOSUB, when an error happens
+    # in this frame or in a function it called.
+    error_target: Optional[int] = None
+    error_gosub: bool = False
+    in_error_gosub: bool = False       # handling an error with ON ERROR GOSUB until its RETURN
+    error_gosub_depth: int = 0         # len(gosub_stack) inside that subroutine
 
 
 class Runtime:
@@ -75,6 +82,7 @@ class Runtime:
         self._line = 0
         self._wait_frames = 0
         self._pending_input = None
+        self.last_error = None      # the error caught by ON ERROR (ERR$ / ERL)
         self.data = ()              # DATA values of the loaded program
         self.data_pos = 0           # next value READ takes
         self._ops = {
@@ -95,6 +103,9 @@ class Runtime:
             C.PRINT_NEWLINE: self.op_print_newline,
             C.INPUT: self.op_input, C.COMMAND: self.op_command,
             C.READ: self.op_read, C.RESTORE: self.op_restore,
+            C.JUMP_IF_TRUE: self.op_jump_if_true, C.CASE_MATCH: self.op_case_match,
+            C.ON_ERROR_GOTO: self.op_on_error_goto, C.ON_ERROR_GOSUB: self.op_on_error_gosub,
+            C.ON_ERROR_OFF: self.op_on_error_off,
         }
 
     # --- extension API (DESIGN.md 8) -------------------------------------------
@@ -131,6 +142,7 @@ class Runtime:
         self.data = compiled.data
         self.data_pos = 0
         self.error = None
+        self.last_error = None
         self._pending_input = None
         self._wait_frames = 0
         self.state = RunState.RUNNING
@@ -150,24 +162,45 @@ class Runtime:
         if self.state != RunState.RUNNING:
             return self.state
         ops = self._ops
-        try:
-            for _ in range(max_steps):
-                frame = self.frames[-1]
-                ins = frame.code.instructions[frame.pc]
-                frame.pc += 1
-                self._line = ins.line
+        for _ in range(max_steps):
+            frame = self.frames[-1]
+            ins = frame.code.instructions[frame.pc]
+            frame.pc += 1
+            self._line = ins.line
+            try:
                 ops[ins.op](ins.arg)
-                if self.state != RunState.RUNNING:
-                    break
-        except BasicError as e:
-            self._fail(e)
+            except BasicError as e:
+                self._error(e)
+            if self.state != RunState.RUNNING:
+                break
         return self.state
 
-    def _fail(self, error):
+    def _error(self, error):
+        """Go to the ON ERROR handler, or stop with the error."""
         if error.line is None:
             error.line = self._line
-        self.error = error
-        self.state = RunState.ERROR
+        if not (isinstance(error, BasicRuntimeError) and self._trap(error)):
+            self.error = error
+            self.state = RunState.ERROR
+
+    def _trap(self, error):
+        """Jump to the nearest ON ERROR handler; frames above it are left (BASIC.md 4.16)."""
+        for i in range(len(self.frames) - 1, -1, -1):
+            frame = self.frames[i]
+            if frame.error_target is not None and not frame.in_error_gosub:
+                break
+        else:
+            return False
+        del self.frames[i + 1:]
+        del self.stack[frame.stack_base:]
+        self.last_error = error
+        if frame.error_gosub:
+            # RETURN goes on after the statement that failed (or the call that led to it).
+            frame.gosub_stack.append(frame.code.resume_points[frame.pc - 1])
+            frame.in_error_gosub = True
+            frame.error_gosub_depth = len(frame.gosub_stack)
+        frame.pc = frame.error_target
+        return True
 
     @property
     def line(self):
@@ -195,7 +228,7 @@ class Runtime:
             else:
                 self._array_for_write(name).set(indices, value)
         except BasicError as e:
-            self._fail(e)
+            self._error(e)
 
     # --- stack helpers ---------------------------------------------------------
     def _pop_n(self, n):
@@ -394,6 +427,36 @@ class Runtime:
         if i >= 0:
             del frame.loops[i:]
 
+    def op_jump_if_true(self, target):
+        if expect_int(self.stack.pop()):
+            self.frames[-1].pc = target
+
+    def op_case_match(self, kind):
+        """One CASE test; the selector stays on the stack (BASIC.md 4.15)."""
+        if kind == "TO":
+            last = self.stack.pop()
+            first = self.stack.pop()
+            selector = self.stack[-1]
+            hit = binary(">=", selector, first) and binary("<=", selector, last)
+        else:
+            value = self.stack.pop()
+            hit = binary(kind, self.stack[-1], value)
+        self.stack.append(1 if hit else 0)
+
+    def op_on_error_goto(self, target):
+        self._set_error_handler(target, gosub=False)
+
+    def op_on_error_gosub(self, target):
+        self._set_error_handler(target, gosub=True)
+
+    def op_on_error_off(self, _):
+        self._set_error_handler(None, gosub=False)
+
+    def _set_error_handler(self, target, gosub):
+        frame = self.frames[-1]
+        frame.error_target = target
+        frame.error_gosub = gosub
+
     def op_gosub(self, target):
         frame = self.frames[-1]
         frame.gosub_stack.append(frame.pc)
@@ -403,14 +466,19 @@ class Runtime:
         frame = self.frames[-1]
         if not frame.gosub_stack:
             raise BasicRuntimeError(RETURN_WITHOUT_GOSUB)
-        frame.pc = frame.gosub_stack.pop()
+        self._return_from_gosub(frame)
 
     def op_return_any(self, _):
         frame = self.frames[-1]
         if frame.gosub_stack:
-            frame.pc = frame.gosub_stack.pop()
+            self._return_from_gosub(frame)
         else:
             self._return(default_for(frame.function.name))
+
+    def _return_from_gosub(self, frame):
+        if frame.in_error_gosub and len(frame.gosub_stack) == frame.error_gosub_depth:
+            frame.in_error_gosub = False        # the ON ERROR GOSUB routine is done
+        frame.pc = frame.gosub_stack.pop()
 
     def op_return_value(self, _):
         self._return(self.stack.pop())

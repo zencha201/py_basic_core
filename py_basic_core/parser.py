@@ -1,8 +1,8 @@
 """Syntax analysis: tokens -> AST (DESIGN.md 4, grammar in BASIC.md appendix B).
 
 Expressions are parsed by recursive descent. Statements are read as a stream
-separated by ":" and line ends; block structures (IF / FOR / WHILE / FUNCTION)
-are matched by reading nested blocks until their closing keyword.
+separated by ":" and line ends; block structures (IF / FOR / WHILE / SELECT /
+FUNCTION) are matched by reading nested blocks until their closing keyword.
 """
 
 from . import nodes
@@ -15,6 +15,8 @@ ELSIF = "ELSIF"
 ENDIF = "ENDIF"
 NEXT = "NEXT"
 WEND = "WEND"
+CASE = "CASE"
+END_SELECT = "END SELECT"
 END_FUNCTION = "END FUNCTION"
 
 # Error for a closing keyword that does not close the current block.
@@ -24,6 +26,8 @@ STRAY_TERMINATOR = {
     ENDIF: "ENDIF WITHOUT IF",
     NEXT: "NEXT WITHOUT FOR",
     WEND: "WEND WITHOUT WHILE",
+    CASE: "CASE WITHOUT SELECT",
+    END_SELECT: "END SELECT WITHOUT SELECT",
     END_FUNCTION: "END FUNCTION WITHOUT FUNCTION",
 }
 
@@ -142,18 +146,20 @@ class Parser:
         tok = self.peek()
         if tok.kind != T.KEYWORD:
             return None
-        if tok.value in (ELSE, ELSIF, ENDIF, NEXT, WEND):
+        if tok.value in (ELSE, ELSIF, ENDIF, NEXT, WEND, CASE):
             return tok.value
         if tok.value == "END":
             following = self.peek(1)
             if following.is_keyword("IF"):
                 return ENDIF
+            if following.is_keyword("SELECT"):
+                return END_SELECT
             if following.is_keyword("FUNCTION"):
                 return END_FUNCTION
         return None
 
     def consume_terminator(self, term):
-        if self.next().value == "END":     # "END IF" / "END FUNCTION"
+        if self.next().value == "END":     # "END IF" / "END SELECT" / "END FUNCTION"
             self.next()
         if term == NEXT and self.peek().kind == T.IDENT:
             self.next()                    # NEXT I: the variable name is ignored
@@ -257,6 +263,75 @@ class Parser:
         body = self.block((WEND,), ("WHILE WITHOUT WEND", line), inline, top_level=False)
         self.consume_terminator(WEND)
         return nodes.While(cond, tuple(body), line)
+
+    def select_statement(self, inline):
+        tok = self.next()
+        if inline:
+            raise self.error("SELECT inside a one-line IF", tok)
+        self.expect_keyword("CASE")
+        selector = self.expr()
+        if not self.peek().ends_statement():
+            raise self.error()
+        opener = ("SELECT WITHOUT END SELECT", tok.line)
+        if self.block((CASE, END_SELECT), opener, top_level=False):
+            raise self.error("statement before CASE")
+        cases = []
+        else_body = None
+        while True:
+            term = self.terminator()
+            self.consume_terminator(term)
+            if term == END_SELECT:
+                return nodes.Select(selector, tuple(cases), else_body, tok.line)
+            if else_body is not None:
+                raise self.error("CASE after CASE ELSE")
+            if self.accept_keyword("ELSE"):
+                else_body = tuple(self.block((CASE, END_SELECT), opener, top_level=False))
+                continue
+            items = self.case_items()
+            cases.append((items, tuple(self.block((CASE, END_SELECT), opener, top_level=False))))
+
+    def case_items(self):
+        """``1, 3 TO 5, IS > 10``"""
+        items = [self.case_item()]
+        while self.accept_op(","):
+            items.append(self.case_item())
+        return tuple(items)
+
+    def case_item(self):
+        tok = self.peek()
+        if tok.kind == T.IDENT and tok.value == "IS":
+            self.next()
+            op = self.peek()
+            if not (op.kind == T.OP and op.value in COMPARISON_OPS):
+                raise self.error("comparison expected")
+            self.next()
+            return nodes.CaseItem(op.value, self.expr())
+        first = self.expr()
+        if self.accept_keyword("TO"):
+            return nodes.CaseItem("TO", first, self.expr())
+        return nodes.CaseItem("=", first)
+
+    def on_statement(self, inline):
+        tok = self.next()
+        word = self.peek()
+        if not (word.kind == T.IDENT and word.value == "ERROR"):
+            raise self.error("ERROR expected")
+        self.next()
+        for kind in ("GOTO", "GOSUB"):
+            if self.accept_keyword(kind):
+                zero = self.peek()
+                if kind == "GOTO" and zero.kind == T.INT and zero.value == 0:
+                    self.next()
+                    return nodes.OnError(None, None, tok.line)       # ON ERROR GOTO 0
+                return nodes.OnError(kind, self.label_name(), tok.line)
+        raise self.error("GOTO or GOSUB expected")
+
+    def continue_statement(self, inline):
+        tok = self.next()
+        for kind in ("FOR", "WHILE"):
+            if self.accept_keyword(kind):
+                return nodes.ContinueLoop(kind, tok.line)
+        return nodes.ContinueLoop(None, tok.line)
 
     def label_name(self):
         self.accept_op("*")
@@ -418,6 +493,9 @@ class Parser:
         "EXIT": exit_statement,
         "DIM": dim_statement,
         "DICT": dict_statement,
+        "SELECT": select_statement,
+        "ON": on_statement,
+        "CONTINUE": continue_statement,
         "ERASE": erase_statement,
         "GLOBAL": global_statement,
         "LET": let_statement,

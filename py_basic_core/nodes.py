@@ -145,6 +145,38 @@ class ExitLoop:
 
 
 @dataclass(frozen=True)
+class ContinueLoop:
+    """``CONTINUE`` / ``CONTINUE FOR`` / ``CONTINUE WHILE``: go on with the next round (BASIC.md 4.7.2)."""
+    kind: Optional[str]     # "FOR", "WHILE", or None for the innermost loop
+    line: int
+
+
+@dataclass(frozen=True)
+class CaseItem:
+    """One test of a CASE: ``= a``, ``a TO b`` or ``IS op a``."""
+    kind: str               # "=", "TO" or a comparison operator for IS
+    first: object
+    last: Optional[object] = None
+
+
+@dataclass(frozen=True)
+class Select:
+    """``SELECT CASE`` (BASIC.md 4.15)."""
+    selector: object
+    cases: tuple            # ((items, body), ...)
+    else_body: Optional[tuple]
+    line: int
+
+
+@dataclass(frozen=True)
+class OnError:
+    """``ON ERROR GOTO / GOSUB label``, or ``ON ERROR GOTO 0`` (kind None) (BASIC.md 4.16)."""
+    kind: Optional[str]     # "GOTO", "GOSUB" or None
+    label: Optional[str]
+    line: int
+
+
+@dataclass(frozen=True)
 class ArrayDecl:
     name: str
     sizes: tuple        # one expression per dimension (1 or 2)

@@ -75,6 +75,11 @@ def walk(body):
                 yield from walk(stmt.else_body)
         elif isinstance(stmt, (nodes.For, nodes.While)):
             yield from walk(stmt.body)
+        elif isinstance(stmt, nodes.Select):
+            for _, body in stmt.cases:
+                yield from walk(body)
+            if stmt.else_body:
+                yield from walk(stmt.else_body)
 
 
 def last_line(program):
@@ -84,10 +89,11 @@ def last_line(program):
 
 @dataclass
 class OpenLoop:
-    """A FOR / WHILE being compiled, for EXIT FOR / EXIT WHILE."""
+    """A FOR / WHILE being compiled, for EXIT and CONTINUE."""
     kind: str               # "FOR" or "WHILE"
     loop_id: int            # FOR only (0 for WHILE)
     exits: list             # JUMP instructions to patch with the loop's end
+    continues: list         # JUMP instructions to patch with the next round's start
 
 
 class UnitCompiler:
@@ -121,11 +127,25 @@ class UnitCompiler:
             if label not in self.unit.labels:
                 raise BasicSyntaxError(UNDEFINED_LABEL, ins.line, label)
             ins.arg = self.unit.labels[label]
+        resume = self.unit.resume_points
+        resume.extend([None] * (self.here() - len(resume)))
+        for i, point in enumerate(resume):
+            if point is None:
+                resume[i] = i + 1
         return self.unit
 
     def block(self, body):
+        resume = self.unit.resume_points
         for stmt in body:
+            start = self.here()
             self.STATEMENTS[type(stmt)](self, stmt)
+            end = self.here()
+            # Statements inside this one (block bodies) were marked first; the rest
+            # (conditions, loop headers) resume after the whole statement.
+            resume.extend([None] * (end - len(resume)))
+            for i in range(start, end):
+                if resume[i] is None:
+                    resume[i] = end
 
     # --- statements ----------------------------------------------------------
     def label(self, s):
@@ -201,41 +221,91 @@ class UnitCompiler:
         top = self.here()
         check = self.emit(C.FOR_CHECK, None, s.line)
         loop = self.loop_body("FOR", loop_id, s.body)
+        self.patch(loop.continues)
         self.emit(C.FOR_STEP, (loop_id, s.var, top), s.line)
         check.arg = (loop_id, s.var, self.here())
-        self.patch_exits(loop)
+        self.patch(loop.exits)
 
     def while_(self, s):
         top = self.here()
         self.expr(s.condition)
         exit_jump = self.emit(C.JUMP_IF_FALSE, None, s.line)
         loop = self.loop_body("WHILE", 0, s.body)
+        self.patch(loop.continues, top)
         self.emit(C.JUMP, top, s.line)
         exit_jump.arg = self.here()
-        self.patch_exits(loop)
+        self.patch(loop.exits)
 
     def loop_body(self, kind, loop_id, body):
-        loop = OpenLoop(kind, loop_id, [])
+        loop = OpenLoop(kind, loop_id, [], [])
         self.loops.append(loop)
         self.block(body)
         self.loops.pop()
         return loop
 
-    def patch_exits(self, loop):
-        for ins in loop.exits:
-            ins.arg = self.here()
+    def patch(self, jumps, target=None):
+        for ins in jumps:
+            ins.arg = self.here() if target is None else target
+
+    def enclosing_loop(self, kind):
+        """Index in self.loops of the innermost loop of ``kind`` (any loop when None), or -1."""
+        for i in range(len(self.loops) - 1, -1, -1):
+            if kind is None or self.loops[i].kind == kind:
+                return i
+        return -1
+
+    def drop_inner_fors(self, loops, line):
+        """Forget the FOR loops being left (the outermost one and those inside it)."""
+        fors = [loop for loop in loops if loop.kind == "FOR"]
+        if fors:
+            self.emit(C.FOR_DROP, fors[0].loop_id, line)
 
     def exit_loop(self, s):
-        """Jump past the innermost loop of the kind, forgetting the FOR loops being left."""
-        for i in range(len(self.loops) - 1, -1, -1):
-            if self.loops[i].kind == s.kind:
-                break
-        else:
+        """Jump past the innermost loop of the kind."""
+        i = self.enclosing_loop(s.kind)
+        if i < 0:
             raise BasicSyntaxError("EXIT %s WITHOUT %s" % (s.kind, s.kind), s.line)
-        left_fors = [loop for loop in self.loops[i:] if loop.kind == "FOR"]
-        if left_fors:
-            self.emit(C.FOR_DROP, left_fors[0].loop_id, s.line)     # the outermost one left
+        self.drop_inner_fors(self.loops[i:], s.line)
         self.loops[i].exits.append(self.emit(C.JUMP, None, s.line))
+
+    def continue_loop(self, s):
+        """Jump to the next round of the innermost loop of the kind (any loop for CONTINUE)."""
+        i = self.enclosing_loop(s.kind)
+        if i < 0:
+            name = "CONTINUE " + s.kind if s.kind else "CONTINUE"
+            raise BasicSyntaxError("%s WITHOUT %s" % (name, s.kind or "LOOP"), s.line)
+        self.drop_inner_fors(self.loops[i + 1:], s.line)
+        self.loops[i].continues.append(self.emit(C.JUMP, None, s.line))
+
+    def select(self, s):
+        """The selector stays on the stack while the CASE tests run; each body starts with POP."""
+        self.expr(s.selector)
+        to_end = []
+        for items, body in s.cases:
+            to_body = []
+            for item in items:
+                self.expr(item.first)
+                if item.last is not None:
+                    self.expr(item.last)
+                self.emit(C.CASE_MATCH, item.kind, s.line)
+                to_body.append(self.emit(C.JUMP_IF_TRUE, None, s.line))
+            next_case = self.emit(C.JUMP, None, s.line)
+            self.patch(to_body)
+            self.emit(C.POP, None, s.line)
+            self.block(body)
+            to_end.append(self.emit(C.JUMP, None, s.line))
+            next_case.arg = self.here()
+        self.emit(C.POP, None, s.line)
+        if s.else_body:
+            self.block(s.else_body)
+        self.patch(to_end)
+
+    def on_error(self, s):
+        if s.kind is None:
+            self.emit(C.ON_ERROR_OFF, None, s.line)
+        else:
+            op = C.ON_ERROR_GOTO if s.kind == "GOTO" else C.ON_ERROR_GOSUB
+            self.emit_to_label(op, s.label, s.line)
 
     def goto(self, s):
         self.emit_to_label(C.JUMP, s.label, s.line)
@@ -303,6 +373,9 @@ class UnitCompiler:
         nodes.End: end,
         nodes.Exit: exit_,
         nodes.ExitLoop: exit_loop,
+        nodes.ContinueLoop: continue_loop,
+        nodes.Select: select,
+        nodes.OnError: on_error,
         nodes.Dim: dim,
         nodes.Global: global_,
         nodes.DictDecl: dict_,

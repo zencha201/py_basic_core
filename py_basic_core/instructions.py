@@ -24,6 +24,11 @@ OR_JUMP = "OR_JUMP"             # arg: target. top true -> 1 and jump, else pop
 # Control flow
 JUMP = "JUMP"                   # arg: target
 JUMP_IF_FALSE = "JUMP_IF_FALSE"  # arg: target
+JUMP_IF_TRUE = "JUMP_IF_TRUE"   # arg: target
+CASE_MATCH = "CASE_MATCH"       # arg: "=", "TO" or a comparison. (stack: selector, values -> selector, 1 / 0)
+ON_ERROR_GOTO = "ON_ERROR_GOTO"    # arg: target
+ON_ERROR_GOSUB = "ON_ERROR_GOSUB"  # arg: target
+ON_ERROR_OFF = "ON_ERROR_OFF"
 FOR_INIT = "FOR_INIT"           # arg: loop id              (stack: end, step)
 FOR_CHECK = "FOR_CHECK"         # arg: (loop id, var, exit target)
 FOR_STEP = "FOR_STEP"           # arg: (loop id, var, loop top)
@@ -45,7 +50,8 @@ READ = "READ"                   # arg: (name, n)            (stack: indices...)
 RESTORE = "RESTORE"             # arg: position in the DATA values
 COMMAND = "COMMAND"             # arg: (name, n)
 
-JUMP_OPS = frozenset((JUMP, JUMP_IF_FALSE, AND_JUMP, OR_JUMP, GOSUB))
+JUMP_OPS = frozenset((JUMP, JUMP_IF_FALSE, JUMP_IF_TRUE, AND_JUMP, OR_JUMP, GOSUB,
+                      ON_ERROR_GOTO, ON_ERROR_GOSUB))
 
 
 @dataclass
@@ -62,3 +68,6 @@ class CodeUnit:
     instructions: list = field(default_factory=list)
     labels: dict = field(default_factory=dict)              # label -> instruction index
     global_names: frozenset = frozenset()                   # names declared GLOBAL (functions)
+    # For each instruction, where the statement it belongs to ends: ON ERROR GOSUB
+    # returns there (an error in the condition of IF / WHILE / SELECT skips the whole block).
+    resume_points: list = field(default_factory=list)

@@ -76,7 +76,10 @@ AST を、スタック型 VM の命令列に変換する。
 - FOR は「開始値を代入 → 終了値と STEP を積む → `FOR_INIT` → 先頭で `FOR_CHECK`（終了判定）→ 本体 → `FOR_STEP`（加算して先頭へ）」に変換する。ループの状態（終了値・STEP）はフレームごとのループ表に、FOR 文ごとの番号で記録する（GOTO でループを抜けて再び入っても正しく動く）。
 - `EXIT FOR` / `EXIT WHILE` は、コンパイル中に囲んでいるループの一覧（`UnitCompiler.loops`）から、いちばん内側の対象のループを探す。そのループの終わりへのジャンプに変換し、ジャンプ先はループを閉じるときに埋める。抜ける範囲に FOR があれば、ジャンプの前に `FOR_DROP`（その中でいちばん外側の FOR から内側のループ表を消す）を置く。
 - DATA 文は命令にせず、メインプログラムの DATA の値をソース順に 1 本の表（`CompiledProgram.data`）に集める。あわせて各ラベルが表のどの位置に当たるかを記録し、`RESTORE ラベル` はその位置に読み取り位置を戻す命令に変換する。`READ` は表から次の値を取り出して代入する命令になる。読み取り位置は Runtime が持つ。
-- 命令の一覧は `instructions.py` を参照（約 40 種）。
+- `CONTINUE` も同じ一覧から対象のループを探し、次の回の始まり（FOR は `FOR_STEP`、WHILE は条件の評価）へのジャンプに変換する。間にあって抜ける FOR があれば `FOR_DROP` を置く。
+- `SELECT CASE` は、式の値をスタックに置いたまま `CASE` の項目ごとに `CASE_MATCH`（`=` / `TO` / `IS` の比較。結果の 1 / 0 を積む）と `JUMP_IF_TRUE` を並べる。各 `CASE` の本体は `POP`（式の値を捨てる）で始まるので、本体の中は普段どおりスタックが空の状態で動く。
+- **再開位置（`CodeUnit.resume_points`）**: 命令ごとに「その命令を含む文が終わる位置」を記録する。`block()` で文をコンパイルするとき、入れ子の文（ブロックの中身）を先に記録し、残り（IF / WHILE / SELECT の条件、FOR の開始値など）には文全体の終わりを記録する。`ON ERROR GOSUB` の `RETURN` 先に使う。
+- 命令の一覧は `instructions.py` を参照（約 45 種）。
 
 ## 6. Runtime（runtime.py）
 ```python
@@ -106,11 +109,12 @@ class Runtime:
 | `STOPPED` | `stop()` が呼ばれた | — |
 | `ERROR` | 実行時エラー | `error` を表示する |
 
-- **フレーム**: 関数呼び出しごとに `Frame(code, scope, function, params, pc, stack_base, gosub_stack, loops)` を積む。メインプログラムも 1 つのフレーム。VM は再帰しないので、BASIC の再帰の深さは Python の再帰上限に影響されない（上限は `max_call_depth`）。
+- **フレーム**: 関数呼び出しごとに `Frame(code, scope, function, params, pc, stack_base, gosub_stack, loops, error_target, ...)` を積む。メインプログラムも 1 つのフレーム。VM は再帰しないので、BASIC の再帰の深さは Python の再帰上限に影響されない（上限は `max_call_depth`）。
 - **値スタック**: 全フレームで 1 本。
 - 1 命令の実行は「`instructions[pc]` を取り出し、命令種別 → メソッドの表で振り分ける」だけにしている。
 - 実行時エラーは `BasicRuntimeError(name)` を送出し、`run()` が行番号を付けて `ERROR` 状態にする。
 - Python で書かれた拡張の中で起きた予期しない例外は `ILLEGAL FUNCTION CALL` として報告し、アプリは止めない。
+- **ON ERROR**（[BASIC.md](BASIC.md) 4.16）: `ON ERROR GOTO / GOSUB` は、実行したフレームに飛び先（`error_target`）と種類を記録する（`ON ERROR GOTO 0` で消す）。実行時エラーが起きたら、上のフレームから順に飛び先を持つフレームを探し、それより上のフレーム（呼び出し中の関数）を捨て、値スタックをそのフレームの開始位置まで戻して飛び先へ移る。GOSUB のときは、エラーが起きた命令（下のフレームで起きた場合はその呼び出しの命令）の再開位置を GOSUB の戻り先として積み、その `RETURN` までの間は同じフレームで次のエラーを捕まえない（エラー処理の中のエラーでくり返しにならないように）。捕まえたエラーは `last_error` に残し、`ERR$()` / `ERL()` が読む。
 
 ## 7. 変数とスコープ（variable.py）
 - `Scope` は変数（名前 → 値）と配列（名前 → `BasicArray`）を持つ。グローバルスコープを 1 つ、関数呼び出しごとにローカルスコープを 1 つ作る。

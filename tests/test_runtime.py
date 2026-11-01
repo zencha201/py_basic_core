@@ -96,3 +96,13 @@ def test_core_uses_only_the_standard_library():
                     if m and not m.group(1).startswith("."):
                         top = m.group(1).split(".")[0]
                         assert top in sys.stdlib_module_names, "%s: %s" % (f, line.strip())
+
+
+def test_select_case_on_one_line_in_direct_mode():
+    rt, host = make_runtime()
+    repl = ReplSession(rt)
+    assert repl.submit("SELECT CASE 2:CASE 1:PRINT 1:CASE 2:PRINT 2:END SELECT")
+    while rt.run() == RunState.RUNNING:
+        pass
+    repl.finish()
+    assert host.output == "2\nREADY.\n"

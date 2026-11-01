@@ -241,6 +241,18 @@ WEND
 - 単独の `EXIT` はダイレクト実行の終了命令（8.2）で、プログラムの中では構文エラーのまま。
 - 1 行 IF の THEN の後ろでは、`:` で続く文も THEN 側になる（4.5）。`FOR I=1 TO 9:IF I=3 THEN EXIT FOR:NEXT` の `NEXT` は THEN 側に入ってしまうので、`IF` と `NEXT` は別の行に書く。
 
+### 4.7.2 CONTINUE / CONTINUE FOR / CONTINUE WHILE
+```basic
+FOR I=1 TO 10
+    IF I%2=0 THEN CONTINUE      ' 偶数は飛ばす
+    PRINT I
+NEXT
+```
+- ループの残りを飛ばして、次の回に進む。FOR は `NEXT` と同じく STEP を足して終了を判定し、WHILE は条件の判定に戻る。
+- `CONTINUE` は、書いた位置を囲んでいるいちばん内側のループ（FOR でも WHILE でも）を対象にする。`CONTINUE FOR` / `CONTINUE WHILE` は、いちばん内側のその種類のループを対象にし、間にある別の種類のループは抜ける（例: FOR の中の WHILE の中で `CONTINUE FOR` を実行すると、WHILE を抜けて FOR の次の回へ進む）。
+- 囲んでいるループがなければ構文エラー（`CONTINUE WITHOUT LOOP` / `CONTINUE FOR WITHOUT FOR` / `CONTINUE WHILE WITHOUT WHILE`）。
+- 1 行 IF の注意は `EXIT FOR` と同じ（4.7.1）。
+
 ### 4.8 END
 - プログラムの実行を終了する。関数の中で実行しても終了する。
 - ソースの終端に達した場合も終了する（`END` は省略可能）。
@@ -334,6 +346,69 @@ ERASE HP                 ' 全部消す
 - `INPUT HP("A")`、`READ HP(K$)` のように、DICT の要素にも入力・読み込みができる。
 - **スコープ**: 配列と同じ。関数の中で作った DICT はその関数の中だけで使え、外の DICT は `GLOBAL HP` で使う。DICT を関数の引数として渡すことはできない。
 - 普通の配列に文字列の添字を使うと `TYPE MISMATCH`（`DIM A(3)` に対する `A("X")`）。
+
+### 4.15 SELECT CASE
+```basic
+SELECT CASE SCORE
+CASE 100
+    PRINT "PERFECT"
+CASE 80 TO 99
+    PRINT "GOOD"
+CASE 50, 60, 70
+    PRINT "OK"
+CASE IS < 50
+    PRINT "TRY AGAIN"
+CASE ELSE
+    PRINT "?"
+END SELECT
+```
+- `SELECT CASE 式` の値（INT でも STRING でもよい）を、上の `CASE` から順に調べ、最初に当てはまった `CASE` の文だけを実行して `END SELECT` の次へ進む。当てはまる `CASE` がなく `CASE ELSE` もなければ何もしない。
+- `SELECT CASE` の式は最初に 1 回だけ評価する。
+- `CASE` に書けるもの（`,` で区切って並べると「どれか 1 つに当てはまれば」）:
+
+| 書き方 | 当てはまる条件 |
+|---|---|
+| `CASE 値` | 式 = 値 |
+| `CASE 値1 TO 値2` | 値1 ≦ 式 ≦ 値2 |
+| `CASE IS 比較演算子 値` | 式 比較演算子 値（`IS < 50`、`IS <> 0` など。`=` `<>` `<` `<=` `>` `>=`） |
+| `CASE ELSE` | ほかのどれにも当てはまらない（最後の `CASE` として 1 つだけ書ける） |
+
+- 式と値の型が違えば `TYPE MISMATCH`（STRING どうしは文字コード順で比べる）。
+- `SELECT CASE` と最初の `CASE` の間に文は書けない。`END SELECT` がなければ `SELECT WITHOUT END SELECT`。
+- `:` で区切って 1 行に書ける（`CASE 1: PRINT "ONE"`）。1 行 IF の THEN / ELSE の後ろには書けない。
+- `IS` は `CASE` の中でだけ意味を持つ（予約語ではない）。
+
+### 4.16 ON ERROR GOTO / ON ERROR GOSUB
+実行時エラー（9 章）が起きたときに、プログラムを止めずにラベルへ移る。
+```basic
+ON ERROR GOTO HANDLER
+INPUT "数";N
+PRINT 100/N
+END
+*HANDLER
+PRINT "エラー: ";ERR$();"（";ERL();"行）"
+```
+```basic
+ON ERROR GOSUB WARN       ' エラーが起きたら WARN を呼び、その後は次の文から続ける
+X=1/0
+PRINT "続き"
+END
+*WARN
+PRINT "注意: ";ERR$()
+RETURN
+```
+| 文 | 動き |
+|---|---|
+| `ON ERROR GOTO ラベル` | エラーが起きたら、そのラベルへ移る（GOTO と同じ） |
+| `ON ERROR GOSUB ラベル` | エラーが起きたら、そのラベルを GOSUB で呼ぶ。`RETURN` で、エラーが起きた文の次の文から続ける |
+| `ON ERROR GOTO 0` | エラー処理をやめる（以後のエラーではプログラムが止まる） |
+
+- **エラーの内容**: `ERR$()` がエラーの名前（例: `"DIVISION BY ZERO"`）、`ERL()` が行番号を返す（6 章）。
+- **捕まえるもの**: 実行時エラーだけ。構文エラー（実行前に見つかるもの）と、フロントエンドからの中断（`stop()`）は捕まえない。
+- **有効な範囲**: `ON ERROR` を実行したメインプログラム（または関数）の中と、そこから呼んだ関数の中で起きたエラー。関数の中で起きたエラーを外側のメインプログラムの `ON ERROR` が捕まえたときは、その関数（と途中の呼び出し）は打ち切られる。関数の中で実行した `ON ERROR` は、その関数を抜けると無効になる。ラベルは `ON ERROR` を書いたメインプログラム（または関数）の中のもの。
+- **「次の文」**: `:` で区切った同じ行の次の文も含む。IF / WHILE / SELECT CASE の条件の評価中、FOR の開始値などの評価中に起きたエラーでは、その IF / WHILE / SELECT CASE / FOR 全体の次の文になる。
+- **エラー処理の中のエラー**: `ON ERROR GOSUB` で呼んだサブルーチンの中（`RETURN` するまで）で起きたエラーでは、プログラムが止まる。`ON ERROR GOTO` で移った先で起きたエラーは、もう一度同じラベルへ移る（何度もエラーになる処理はくり返しになるので注意）。
+- `ERROR` は `ON ERROR` の中でだけ意味を持つ（予約語ではない）。
 
 ---
 
@@ -442,6 +517,8 @@ GLOBAL MAP              ' 配列も同じ書き方
 | `HASKEY(d,key)` | DICT d にキーがあれば 1、なければ 0（4.14） | `HASKEY(HP,"SLIME")` |
 | `COUNT(d)` | DICT d のキーの数 | `COUNT(HP)` |
 | `KEY$(d,i)` | DICT d の i 番目（0 から、追加した順）のキー | `KEY$(HP,0)` |
+| `ERR$()` | `ON ERROR` で捕まえたエラーの名前（まだなければ `""`）（4.16） | `"DIVISION BY ZERO"` |
+| `ERL()` | `ON ERROR` で捕まえたエラーの行番号（まだなければ 0） | `ERL()` → 12 |
 
 - 引数の個数・型が合わなければ実行時エラー（`ARGUMENT COUNT MISMATCH` / `TYPE MISMATCH`）。LEFT$ などで n が負なら `ILLEGAL FUNCTION CALL`、文字数を超える n は末尾までとする。
 
@@ -483,7 +560,7 @@ GLOBAL MAP              ' 配列も同じ書き方
 ### 9.1 種類
 | 区分 | 検出時期 | 例 |
 |---|---|---|
-| 構文エラー | 実行前（解析時） | `SYNTAX ERROR`、`UNTERMINATED STRING`、`UNDEFINED LABEL`、`DUPLICATE LABEL`、`DUPLICATE FUNCTION`、`IF WITHOUT ENDIF`、`ENDIF WITHOUT IF`、`ELSE WITHOUT IF`、`ELSIF WITHOUT IF`、`FOR WITHOUT NEXT`、`NEXT WITHOUT FOR`、`WHILE WITHOUT WEND`、`WEND WITHOUT WHILE`、`FUNCTION WITHOUT END FUNCTION`、`END FUNCTION WITHOUT FUNCTION`、`EXIT FOR WITHOUT FOR`、`EXIT WHILE WITHOUT WHILE`、`NOT ALLOWED IN DIRECT MODE` |
+| 構文エラー | 実行前（解析時） | `SYNTAX ERROR`、`UNTERMINATED STRING`、`UNDEFINED LABEL`、`DUPLICATE LABEL`、`DUPLICATE FUNCTION`、`IF WITHOUT ENDIF`、`ENDIF WITHOUT IF`、`ELSE WITHOUT IF`、`ELSIF WITHOUT IF`、`FOR WITHOUT NEXT`、`NEXT WITHOUT FOR`、`WHILE WITHOUT WEND`、`WEND WITHOUT WHILE`、`FUNCTION WITHOUT END FUNCTION`、`END FUNCTION WITHOUT FUNCTION`、`EXIT FOR WITHOUT FOR`、`EXIT WHILE WITHOUT WHILE`、`CONTINUE WITHOUT LOOP`、`CONTINUE FOR WITHOUT FOR`、`CONTINUE WHILE WITHOUT WHILE`、`SELECT WITHOUT END SELECT`、`CASE WITHOUT SELECT`、`END SELECT WITHOUT SELECT`、`NOT ALLOWED IN DIRECT MODE` |
 | 実行時エラー | 実行中 | `TYPE MISMATCH`、`DIVISION BY ZERO`、`SUBSCRIPT OUT OF RANGE`、`UNDEFINED ARRAY`、`UNDEFINED FUNCTION`、`ARGUMENT COUNT MISMATCH`、`ILLEGAL FUNCTION CALL`、`FILE NOT FOUND`、`OUT OF DATA`、`REDIM`、`ARRAY AND VARIABLE NAME CONFLICT`、`STACK OVERFLOW`、`RETURN WITHOUT GOSUB`、`NEXT WITHOUT FOR`（GOTO でループの途中に飛び込んだ場合）、`STEP IS ZERO` |
 
 ### 9.2 表示
@@ -493,7 +570,7 @@ GLOBAL MAP              ' 配列も同じ書き方
 ```
 - 行番号はソースの行番号（1 始まり。エディタで表示する行番号と同じ）。ダイレクト実行では行番号を付けない。
 - 括弧内は補足（あれば）。
-- エラーで実行を中止する（`ON ERROR` 等のエラー処理構文は初版ではない）。
+- 実行時エラーでは実行を中止する。`ON ERROR`（4.16）を使うと、止めずにエラー処理へ移れる。
 
 ---
 
@@ -501,17 +578,16 @@ GLOBAL MAP              ' 配列も同じ書き方
 設計で受け口を用意しておく（[DESIGN.md](DESIGN.md) 9）。
 - FUNCTION のデフォルト引数（`FUNCTION F(A, B=10)`）・可変長引数（`FUNCTION F(A, ...REST)`）
 - 配列の引数渡し・配列を返す関数
-- `CONTINUE`
-- `SELECT CASE`、`DO ... LOOP`
-- `ON ERROR`
+- `DO ... LOOP`
+- `RESUME`（エラー処理から、エラーが起きた文に戻ってやり直す）、`ON 式 GOTO / GOSUB`
 - 実数型
 
 ---
 
 ## 付録 A. 予約語
 ```
-AND DATA DICT DIM ELSE ELSIF END ENDIF ERASE EXIT FOR FUNCTION GLOBAL GOSUB GOTO IF INPUT LET
-NEXT NOT OR PRINT READ REM RESTORE RETURN STEP THEN TO WEND WHILE
+AND CASE CONTINUE DATA DICT DIM ELSE ELSIF END ENDIF ERASE EXIT FOR FUNCTION GLOBAL GOSUB GOTO
+IF INPUT LET NEXT NOT ON OR PRINT READ REM RESTORE RETURN SELECT STEP THEN TO WEND WHILE
 ```
 （`EXIT` はダイレクト実行の終了命令で、プログラム中では構文エラー。`REM` はコメント。命令拡張で登録した名前も予約語と同じ扱いになる）
 
@@ -523,7 +599,7 @@ label       = "*" IDENT ;
 statements  = statement { ":" statement } ;
 
 statement   = assign | print | input | if | for | next | while | wend
-            | exit_loop | goto | gosub | return | end | dim | global
+            | exit_loop | continue | select | on_error | goto | gosub | return | end | dim | global
             | data | read | restore | dict | erase
             | function_def | end_function | call_stmt | command ;
 
@@ -543,6 +619,12 @@ next        = "NEXT" [ IDENT ] ;
 while       = "WHILE" expr ;
 wend        = "WEND" ;
 exit_loop   = "EXIT" ( "FOR" | "WHILE" ) ;
+continue    = "CONTINUE" [ "FOR" | "WHILE" ] ;
+select      = "SELECT" "CASE" expr { case } [ "CASE" "ELSE" statements ] "END" "SELECT" ;
+case        = "CASE" case_item { "," case_item } statements ;
+case_item   = expr [ "TO" expr ] | "IS" ( "=" | "<>" | "<" | "<=" | ">" | ">=" ) expr ;
+on_error    = "ON" "ERROR" ( "GOTO" ( label_ref | "0" ) | "GOSUB" label_ref ) ;
+label_ref   = [ "*" ] IDENT ;
 goto        = "GOTO" [ "*" ] IDENT ;
 gosub       = "GOSUB" [ "*" ] IDENT ;
 return      = "RETURN" [ expr ] ;
@@ -573,4 +655,4 @@ unary       = ( "-" | "+" ) unary | primary ;
 primary     = INT | STRING | IDENT [ "(" [ expr { "," expr } ] ")" ] | "(" expr ")" ;
 comment     = ( "REM" | "'" ) { ANY } ;
 ```
-- ブロック構文（IF / FOR / WHILE / FUNCTION）の対応は、解析器が行をまたいで確認する。
+- ブロック構文（IF / FOR / WHILE / SELECT / FUNCTION）の対応は、解析器が行をまたいで確認する。

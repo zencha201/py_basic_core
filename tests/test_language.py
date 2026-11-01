@@ -417,3 +417,164 @@ def test_exit_loop_errors():
     assert error_of("EXIT FOR").name == "EXIT FOR WITHOUT FOR"
     assert error_of("FOR I=1 TO 2\nEXIT WHILE\nNEXT").name == "EXIT WHILE WITHOUT WHILE"
     assert error_of("EXIT").name == "SYNTAX ERROR"      # plain EXIT is for direct mode
+
+
+def test_select_case():
+    src = """
+FOR I=1 TO 12
+    SELECT CASE I
+    CASE 1
+        PRINT "A";
+    CASE 2, 3
+        PRINT "B";
+    CASE 4 TO 6
+        PRINT "C";
+    CASE IS >= 10
+        PRINT "D";
+    CASE ELSE
+        PRINT "E";
+    END SELECT
+NEXT
+PRINT
+"""
+    assert run(src) == "ABBCCCEEEDDD\n"
+    assert run('S$="Y"\nSELECT CASE S$\nCASE "X": PRINT 1\nCASE "Y", "Z": PRINT 2\nEND SELECT') == "2\n"
+    # no CASE matches and no CASE ELSE: nothing runs; the selector is evaluated once
+    assert run("SELECT CASE F()\nCASE 9: PRINT 9\nEND SELECT\nPRINT N\n"
+               "FUNCTION F()\nGLOBAL N\nN=N+1\nRETURN 1\nEND FUNCTION") == "1\n"
+    # nested, and EXIT FOR from inside a CASE
+    src = """
+FOR I=1 TO 5
+    SELECT CASE I
+    CASE 3
+        EXIT FOR
+    CASE ELSE
+        SELECT CASE I % 2
+        CASE 0: PRINT "E";
+        CASE 1: PRINT "O";
+        END SELECT
+    END SELECT
+NEXT
+PRINT I
+"""
+    assert run(src) == "OE3\n"
+
+
+def test_select_case_errors():
+    assert error_of("SELECT CASE 1\nCASE 1").name == "SELECT WITHOUT END SELECT"
+    assert error_of("SELECT CASE 1\nPRINT 1\nCASE 1\nEND SELECT").name == "SYNTAX ERROR"
+    assert error_of("SELECT CASE 1\nCASE ELSE\nCASE 1\nEND SELECT").name == "SYNTAX ERROR"
+    assert error_of("CASE 1").name == "CASE WITHOUT SELECT"
+    assert error_of("END SELECT").name == "END SELECT WITHOUT SELECT"
+    assert error_of('SELECT CASE 1\nCASE "A"\nEND SELECT').name == "TYPE MISMATCH"
+    assert error_of("IF 1 THEN SELECT CASE 1").name == "SYNTAX ERROR"
+
+
+def test_continue():
+    assert run("FOR I=1 TO 6\nIF I%2=0 THEN CONTINUE\nPRINT I;\nNEXT") == "135"
+    assert run("N=0\nWHILE N<6\nN=N+1\nIF N=3 THEN CONTINUE WHILE\nPRINT N;\nWEND") == "12456"
+    src = """
+FOR I=1 TO 3
+    J=0
+    WHILE 1
+        J=J+1
+        IF J>2 THEN CONTINUE FOR
+        PRINT I*10+J;" ";
+    WEND
+NEXT
+PRINT "/";I
+"""
+    assert run(src) == "11 12 21 22 31 32 /4\n"
+    assert error_of("CONTINUE").name == "CONTINUE WITHOUT LOOP"
+    assert error_of("FOR I=1 TO 2\nCONTINUE WHILE\nNEXT").name == "CONTINUE WHILE WITHOUT WHILE"
+
+
+def test_on_error_goto():
+    src = """
+ON ERROR GOTO HANDLER
+PRINT 1
+X=1/0
+PRINT "NOT HERE"
+END
+*HANDLER
+PRINT ERR$();" IN ";ERL()
+"""
+    assert run(src) == "1\nDIVISION BY ZERO IN 4\n"
+    # the handler can go back, and the next error is caught again
+    src = """
+ON ERROR GOTO RETRY
+N=0
+*AGAIN
+N=N+1
+IF N<3 THEN X=1/0
+PRINT "DONE";N
+END
+*RETRY
+PRINT "RETRY";
+GOTO AGAIN
+"""
+    assert run(src) == "RETRYRETRYDONE3\n"
+    assert run("PRINT ERR$();ERL()") == "0\n"
+
+
+def test_on_error_gosub_returns_after_the_failing_statement():
+    src = """
+ON ERROR GOSUB H
+X=1/0:PRINT "SAME LINE"
+DIM A(2)
+A(5)=1
+PRINT "NEXT LINE"
+IF 1/0 THEN PRINT "NOT RUN" ELSE PRINT "NOT RUN EITHER"
+PRINT "AFTER IF"
+END
+*H
+PRINT ERR$()
+RETURN
+"""
+    assert run(src) == ("DIVISION BY ZERO\nSAME LINE\nSUBSCRIPT OUT OF RANGE\nNEXT LINE\n"
+                        "DIVISION BY ZERO\nAFTER IF\n")
+
+
+def test_on_error_across_functions_and_off():
+    src = """
+ON ERROR GOSUB H
+X=F()
+PRINT "BACK"
+ON ERROR GOTO 0
+Y=1/0
+END
+*H
+PRINT "H:";ERR$()
+RETURN
+FUNCTION F()
+    PRINT "IN F"
+    RETURN 1/0
+END FUNCTION
+"""
+    rt_error = error_of(src)
+    assert rt_error.name == "DIVISION BY ZERO" and rt_error.line == 6
+    assert run(src.replace("Y=1/0\n", "")) == "IN F\nH:DIVISION BY ZERO\nBACK\n"
+    # a handler inside a function covers that function only
+    src = """
+PRINT F()
+PRINT 1/0
+FUNCTION F()
+    ON ERROR GOTO FAIL
+    RETURN 1/0
+*FAIL
+    RETURN -1
+END FUNCTION
+"""
+    rt_error = error_of(src)
+    assert rt_error.name == "DIVISION BY ZERO" and rt_error.line == 3
+
+
+def test_error_inside_on_error_gosub_stops_the_program():
+    src = "ON ERROR GOSUB H\nX=1/0\nEND\n*H\nY=Z(1)\nRETURN"
+    assert error_of(src).name == "UNDEFINED FUNCTION"
+
+
+def test_on_error_syntax():
+    assert error_of("ON ERROR GOTO NOWHERE").name == "UNDEFINED LABEL"
+    assert error_of("ON ERROR PRINT").name == "SYNTAX ERROR"
+    assert error_of("ON X GOTO A").name == "SYNTAX ERROR"
