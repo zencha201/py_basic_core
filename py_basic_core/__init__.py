@@ -6,7 +6,7 @@ relative.
 """
 
 from .errors import BasicError, BasicRuntimeError, BasicSyntaxError
-from .function import CallContext, Suspend, WaitFrames
+from .function import CallContext, Suspend, WaitFrames, WaitUntil
 from .host import BufferHost, Host
 from .repl import ReplSession
 from .runtime import Runtime, RunState
@@ -14,7 +14,7 @@ from .stdlib import install_standard
 
 __all__ = [
     "BasicError", "BasicRuntimeError", "BasicSyntaxError",
-    "CallContext", "Suspend", "WaitFrames",
+    "CallContext", "Suspend", "WaitFrames", "WaitUntil",
     "BufferHost", "Host", "ReplSession", "Runtime", "RunState",
     "install_standard",
 ]

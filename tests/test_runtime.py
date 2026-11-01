@@ -106,3 +106,73 @@ def test_select_case_on_one_line_in_direct_mode():
         pass
     repl.finish()
     assert host.output == "2\nREADY.\n"
+
+
+def run_until_done(rt):
+    while rt.run() == RunState.RUNNING:
+        pass
+    return rt.state
+
+
+def test_call_event_after_the_main_program():
+    rt, host = make_runtime()
+    rt.load('PRINT "MAIN"\nFUNCTION CLICKED()\nGLOBAL N\nN=N+1\nPRINT "CLICK";N\nEND FUNCTION')
+    assert run_until_done(rt) == RunState.FINISHED and not rt.ended_by_end
+    assert rt.has_function("clicked") and not rt.has_function("NOPE")
+    assert rt.call_event("CLICKED") and rt.in_event
+    assert run_until_done(rt) == RunState.FINISHED and not rt.in_event
+    assert rt.call_event("CLICKED")
+    run_until_done(rt)
+    assert host.output == "MAIN\nCLICK1\nCLICK2\n"
+    assert not rt.call_event("NOPE")
+
+
+def test_call_event_during_wait_returns_to_the_wait():
+    rt, host = make_runtime()
+    rt.register_command("WAIT", lambda ctx, args: WaitFrames(args[0]), 1, 1)
+    rt.load('WAIT 3\nPRINT "AFTER"\nFUNCTION E()\nPRINT "EVENT"\nEND FUNCTION')
+    assert rt.run() == RunState.WAITING_FRAMES
+    assert rt.call_event("E")
+    assert rt.run() == RunState.WAITING_FRAMES          # the event ran, the WAIT goes on
+    while rt.run() != RunState.FINISHED:
+        pass
+    assert host.output.startswith("EVENT\n") and host.output.endswith("AFTER\n")
+
+
+def test_end_in_an_event_ends_the_program():
+    rt, host = make_runtime()
+    rt.load("PRINT 1\nFUNCTION QUIT()\nEND\nEND FUNCTION")
+    run_until_done(rt)
+    assert rt.call_event("QUIT")
+    assert run_until_done(rt) == RunState.FINISHED and rt.ended_by_end
+    assert not rt.call_event("QUIT")
+
+
+def test_errors_in_events_do_not_use_the_main_handler():
+    rt, host = make_runtime()
+    rt.load('ON ERROR GOTO H\nGOTO DONE\n*H\nPRINT "MAIN HANDLER"\n*DONE\n'
+            "FUNCTION BAD()\nX=1/0\nEND FUNCTION")
+    assert run_until_done(rt) == RunState.FINISHED and not rt.ended_by_end
+    assert rt.call_event("BAD")
+    assert run_until_done(rt) == RunState.ERROR and rt.error.name == "DIVISION BY ZERO"
+    assert "MAIN HANDLER" not in host.output
+
+
+def test_events_need_a_function_without_parameters_and_one_at_a_time():
+    rt, host = make_runtime()
+    rt.load("FUNCTION F(A)\nEND FUNCTION\nFUNCTION G()\nEND FUNCTION")
+    run_until_done(rt)
+    assert not rt.call_event("F")
+    assert rt.call_event("G") and not rt.call_event("G")
+
+
+def test_wait_until():
+    from py_basic_core import WaitUntil
+    flag = []
+    rt, host = make_runtime()
+    rt.register_command("HOLD", lambda ctx, args: WaitUntil(lambda: bool(flag)), 0, 0)
+    rt.load('HOLD\nPRINT "GO"')
+    assert rt.run() == RunState.WAITING_FRAMES
+    assert rt.run() == RunState.WAITING_FRAMES and host.output == ""
+    flag.append(1)
+    assert rt.run() == RunState.FINISHED and host.output == "GO\n"

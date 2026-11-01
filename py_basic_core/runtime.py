@@ -15,7 +15,8 @@ from .errors import (DIVISION_BY_ZERO, OUT_OF_DATA, ILLEGAL_FUNCTION_CALL, NAME_
                      NEXT_WITHOUT_FOR, REDIM, RETURN_WITHOUT_GOSUB, STACK_OVERFLOW, STEP_IS_ZERO,
                      TYPE_MISMATCH, UNDEFINED_ARRAY, UNDEFINED_FUNCTION, BasicError,
                      BasicRuntimeError)
-from .function import CallContext, Suspend, WaitFrames, bind_arguments, check_arg_count
+from .function import (CallContext, Suspend, WaitFrames, WaitUntil, bind_arguments,
+                       check_arg_count)
 from .lexer import tokenize
 from .parser import parse
 from .registry import Registry
@@ -66,6 +67,7 @@ class Frame:
     error_gosub: bool = False
     in_error_gosub: bool = False       # handling an error with ON ERROR GOSUB until its RETURN
     error_gosub_depth: int = 0         # len(gosub_stack) inside that subroutine
+    event: bool = False                # a function called by call_event()
 
 
 class Runtime:
@@ -81,6 +83,9 @@ class Runtime:
         self.frames = []
         self._line = 0
         self._wait_frames = 0
+        self._wait_until = None     # WaitUntil.ready while waiting for a condition
+        self._event = None          # state saved by call_event() until the event function returns
+        self.ended_by_end = False   # FINISHED by an END statement (not by the end of the source)
         self._pending_input = None
         self.last_error = None      # the error caught by ON ERROR (ERR$ / ERL)
         self.data = ()              # DATA values of the loaded program
@@ -145,6 +150,9 @@ class Runtime:
         self.last_error = None
         self._pending_input = None
         self._wait_frames = 0
+        self._wait_until = None
+        self._event = None
+        self.ended_by_end = False
         self.state = RunState.RUNNING
 
     def stop(self):
@@ -155,9 +163,14 @@ class Runtime:
     def run(self, max_steps=10000):
         """Run up to ``max_steps`` instructions and return the state."""
         if self.state == RunState.WAITING_FRAMES:
-            self._wait_frames -= 1
-            if self._wait_frames > 0:
-                return self.state
+            if self._wait_until is not None:
+                if not self._wait_until():
+                    return self.state
+                self._wait_until = None
+            else:
+                self._wait_frames -= 1
+                if self._wait_frames > 0:
+                    return self.state
             self.state = RunState.RUNNING
         if self.state != RunState.RUNNING:
             return self.state
@@ -184,8 +197,16 @@ class Runtime:
             self.state = RunState.ERROR
 
     def _trap(self, error):
-        """Jump to the nearest ON ERROR handler; frames above it are left (BASIC.md 4.16)."""
+        """Jump to the nearest ON ERROR handler; frames above it are left (BASIC.md 4.16).
+
+        An event function (call_event) is a boundary: handlers below it are not used.
+        """
+        lowest = 0
         for i in range(len(self.frames) - 1, -1, -1):
+            if self.frames[i].event:
+                lowest = i
+                break
+        for i in range(len(self.frames) - 1, lowest - 1, -1):
             frame = self.frames[i]
             if frame.error_target is not None and not frame.in_error_gosub:
                 break
@@ -487,7 +508,43 @@ class Runtime:
         frame = self.frames.pop()
         check_for_name(frame.function.name, value)
         del self.stack[frame.stack_base:]
-        self.stack.append(value)
+        if frame.event:
+            # Back to what the program was doing before the event (the value is not used).
+            self.state, self._wait_frames, self._wait_until = self._event
+            self._event = None
+        else:
+            self.stack.append(value)
+
+    # --- events (called by front ends, e.g. a GUI) ------------------------------------
+    def has_function(self, name):
+        return name.upper() in self.functions
+
+    @property
+    def in_event(self):
+        return self._event is not None
+
+    def call_event(self, name):
+        """Call the user function ``name`` (no arguments) as an event, e.g. a button click.
+
+        Possible while the program is running between run() calls, waiting (WAIT)
+        or finished at the end of the source. The function runs with the following
+        run() calls; when it returns, the program goes back to what it was doing.
+        Returns False when the call is not possible now (another event is running,
+        the program has ended with END or an error, or there is no such function).
+        """
+        function = self.functions.get(name.upper())
+        possible = (self.state in (RunState.RUNNING, RunState.WAITING_FRAMES)
+                    or (self.state == RunState.FINISHED and not self.ended_by_end))
+        if function is None or function.min_args or self._event is not None or not possible:
+            return False
+        if len(self.frames) > self.max_call_depth:
+            return False
+        self._event = (self.state, self._wait_frames, self._wait_until)
+        self._wait_until = None
+        self.frames.append(Frame(function.code, Scope(), function, {}, stack_base=len(self.stack),
+                                 event=True))
+        self.state = RunState.RUNNING
+        return True
 
     def op_call(self, arg):
         name, n = arg
@@ -520,7 +577,9 @@ class Runtime:
         except Exception as e:      # a bug or bad input in an extension: report, do not crash
             raise BasicRuntimeError(ILLEGAL_FUNCTION_CALL, detail="%s: %s" % (callable_.name, e))
 
-    def op_end(self, _):
+    def op_end(self, explicit):
+        self.ended_by_end = bool(explicit)
+        self._event = None
         self.state = RunState.FINISHED
 
     def op_exit(self, _):
@@ -572,6 +631,9 @@ class Runtime:
             if result.frames > 0:
                 self._wait_frames = result.frames
                 self.state = RunState.WAITING_FRAMES
+        elif isinstance(result, WaitUntil):
+            self._wait_until = result.ready
+            self.state = RunState.WAITING_FRAMES
         elif isinstance(result, Suspend):
             raise BasicRuntimeError(ILLEGAL_FUNCTION_CALL, detail=name)
 

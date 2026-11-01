@@ -38,7 +38,7 @@ RETURN_SUB = "RETURN_SUB"       # RETURN in the main program
 RETURN_ANY = "RETURN_ANY"       # RETURN without a value in a function: GOSUB return or function return
 RETURN_VALUE = "RETURN_VALUE"   # (stack: value)
 CALL = "CALL"                   # arg: (name, n)            function only
-END = "END"
+END = "END"                     # arg: True for an END statement, None at the end of the source
 EXIT = "EXIT"
 
 # Input / output and extensions

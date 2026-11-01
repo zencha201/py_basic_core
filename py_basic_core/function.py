@@ -67,6 +67,12 @@ class WaitFrames(Suspend):
     frames: int
 
 
+@dataclass
+class WaitUntil(Suspend):
+    """Pause until ready() is true; it is checked once per Runtime.run() call."""
+    ready: Callable[[], bool]
+
+
 class CallContext:
     """What a Python function or command receives besides its arguments."""
 

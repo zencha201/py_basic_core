@@ -94,8 +94,11 @@ class Runtime:
     def run(self, max_steps=10000): ...  # -> RunState
     def provide_input(self, text): ...
     def stop(self): ...
+    # イベント（14）
+    def call_event(self, name): ...      # -> bool
+    def has_function(self, name): ...
     # 状態
-    state, error, globals, functions
+    state, error, globals, functions, in_event, ended_by_end
 ```
 - **協調実行**: 別スレッドを使わず、呼び出し側（画面のフレーム処理など）が `run(max_steps)` を繰り返し呼ぶ。`run()` は最大 `max_steps` 命令を実行して、次の実行状態を返す。
 
@@ -103,7 +106,7 @@ class Runtime:
 |---|---|---|
 | `RUNNING` | まだ続きがある | もう一度 `run()` を呼ぶ |
 | `WAITING_INPUT` | INPUT で入力待ち | 入力を集め、確定したら `provide_input(text)` |
-| `WAITING_FRAMES` | 命令が `WaitFrames(n)` を返して待機中 | 1 フレームごとに `run()` を呼ぶ（1 回の呼び出しを 1 フレームと数える） |
+| `WAITING_FRAMES` | 命令が `WaitFrames(n)` / `WaitUntil(ready)` を返して待機中 | 1 フレームごとに `run()` を呼ぶ（1 回の呼び出しを 1 フレームと数える。`WaitUntil` は呼ぶたびに `ready()` を確かめる） |
 | `FINISHED` | END / ソース終端 | 終了 |
 | `EXITED` | EXIT（ダイレクト実行） | ダイレクト実行を終える |
 | `STOPPED` | `stop()` が呼ばれた | — |
@@ -141,7 +144,7 @@ def cls_command(ctx, args):
     ...
 runtime.register_command("CLS", cls_command, min_args=0, max_args=1)
 ```
-- `fn(ctx, args) -> None | WaitFrames(n)`。`WaitFrames(n)` を返すと n フレーム待つ。
+- `fn(ctx, args) -> None | WaitFrames(n) | WaitUntil(ready)`。`WaitFrames(n)` を返すと n フレーム待つ。`WaitUntil(ready)` を返すと、`ready()` が真になるまで待つ（`run()` を呼ぶたびに 1 回確かめる。GUI のメッセージボックスが閉じるまで待つ、など）。
 - 標準関数（`stdlib/standard_functions.py`）も、フロントエンドの命令（Pyxel 版の描画命令など）も同じ API で登録する（特別扱いしない）。
 - 命令名は予約語と同じ扱いになるため、プログラムの解析より前に登録する。
 
@@ -182,4 +185,19 @@ class Host(Protocol):
 
 ## 13. テスト
 - `tests/` を pytest で実行する（リポジトリのフォルダで `python -m pytest`）。`tests/conftest.py` がリポジトリのフォルダを `sys.path` に入れ、`py_basic_core` を import できるようにする。
-- `test_language.py`: 言語仕様（BASIC.md の例を含む）。`test_runtime.py`: 拡張 API・中断と再開・WAIT・ダイレクト実行・依存の規則。`test_terminal.py`: 文字画面のモデル。
+- `test_language.py`: 言語仕様（BASIC.md の例を含む）。`test_runtime.py`: 拡張 API・中断と再開・WAIT・イベント（14）・ダイレクト実行・依存の規則。`test_terminal.py`: 文字画面のモデル。
+
+## 14. イベント（フロントエンドから関数を呼ぶ）
+GUI のボタンのクリックなど、プログラムの外で起きたことを BASIC の関数で処理するための API。文法は変えず、フロントエンド（Pyxel 版の GUI など）が使う。
+```python
+runtime.call_event("OK_BUTTON_CLICK")   # -> True（呼べた） / False（今は呼べない）
+runtime.in_event                        # イベントの関数を実行中
+runtime.ended_by_end                    # END 文で終わった（ソースの終わりで終わったときは False）
+runtime.has_function("OK_BUTTON_CLICK")
+```
+- `call_event(name)` は引数のないユーザ関数を、イベント用のフレーム（`Frame.event`）として積む。実行は続く `run()` の呼び出しで進む。
+- 呼べるのは、状態が `RUNNING`（`run()` の呼び出しの合間）、`WAITING_FRAMES`（`WAIT` 中など）、ソースの終わりで終わった `FINISHED` のとき。次のときは `False` を返し、何もしない: 関数がない・引数がある、ほかのイベントの関数を実行中、`END` やエラーで終わったあと、`INPUT` の入力待ち、呼び出しの深さが上限。
+- 呼ぶ前の状態（状態・`WAIT` の残りフレーム数・`WaitUntil` の条件）を保存し、関数が戻ったらそれに戻す。`WAIT` 中に呼ばれた関数が戻ると `WAIT` の続きになり、終わったプログラムは `FINISHED` に戻る。戻り値は捨てる。
+- イベントの関数の中で `END` を実行すると、プログラム全体が終わる（`ended_by_end` が真になり、以後のイベントは呼べない）。
+- **ON ERROR**: イベントのフレームは境界になる。イベントの関数の中のエラーは、その関数（とそこから呼んだ関数）の `ON ERROR` だけが捕まえ、メインプログラムの `ON ERROR` には飛ばない（イベントが割り込んだ位置に飛ぶと、元の処理を壊すため）。捕まらなければ `ERROR` になる。
+- `END` 命令は、`END` 文では引数 `True`、ソースの終わりに置く命令では `None` を持ち、`ended_by_end` を区別する。

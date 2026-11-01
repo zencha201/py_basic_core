@@ -323,7 +323,7 @@ class UnitCompiler:
             self.emit(C.RETURN_ANY if self.in_function else C.RETURN_SUB, None, s.line)
 
     def end(self, s):
-        self.emit(C.END, None, s.line)
+        self.emit(C.END, True, s.line)     # True: an END statement (not the end of the source)
 
     def exit_(self, s):
         self.emit(C.EXIT, None, s.line)
