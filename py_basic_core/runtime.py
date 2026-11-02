@@ -83,7 +83,7 @@ class Runtime:
         self.frames = []
         self._line = 0
         self._wait_frames = 0
-        self._wait_until = None     # WaitUntil.ready while waiting for a condition
+        self._wait_until = None     # (WaitUntil, line of the command) while waiting for a condition
         self._event = None          # state saved by call_event() until the event function returns
         self.ended_by_end = False   # FINISHED by an END statement (not by the end of the source)
         self._pending_input = None
@@ -164,14 +164,22 @@ class Runtime:
         """Run up to ``max_steps`` instructions and return the state."""
         if self.state == RunState.WAITING_FRAMES:
             if self._wait_until is not None:
-                if not self._wait_until():
+                wait, line = self._wait_until
+                if not wait.ready():
                     return self.state
                 self._wait_until = None
+                self.state = RunState.RUNNING
+                if wait.then is not None:
+                    self._line = line
+                    try:
+                        wait.then()
+                    except BasicError as e:
+                        self._error(e)
             else:
                 self._wait_frames -= 1
                 if self._wait_frames > 0:
                     return self.state
-            self.state = RunState.RUNNING
+                self.state = RunState.RUNNING
         if self.state != RunState.RUNNING:
             return self.state
         ops = self._ops
@@ -632,7 +640,7 @@ class Runtime:
                 self._wait_frames = result.frames
                 self.state = RunState.WAITING_FRAMES
         elif isinstance(result, WaitUntil):
-            self._wait_until = result.ready
+            self._wait_until = (result, self._line)
             self.state = RunState.WAITING_FRAMES
         elif isinstance(result, Suspend):
             raise BasicRuntimeError(ILLEGAL_FUNCTION_CALL, detail=name)

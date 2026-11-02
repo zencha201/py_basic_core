@@ -144,7 +144,7 @@ def cls_command(ctx, args):
     ...
 runtime.register_command("CLS", cls_command, min_args=0, max_args=1)
 ```
-- `fn(ctx, args) -> None | WaitFrames(n) | WaitUntil(ready)`。`WaitFrames(n)` を返すと n フレーム待つ。`WaitUntil(ready)` を返すと、`ready()` が真になるまで待つ（`run()` を呼ぶたびに 1 回確かめる。GUI のメッセージボックスが閉じるまで待つ、など）。
+- `fn(ctx, args) -> None | WaitFrames(n) | WaitUntil(ready)`。`WaitFrames(n)` を返すと n フレーム待つ。`WaitUntil(ready, then=None)` を返すと、`ready()` が真になるまで待つ（`run()` を呼ぶたびに 1 回確かめる。GUI のメッセージボックスが閉じるまで待つ、など）。`then` を渡すと、待ち終わったときに主スレッドで呼ぶ。`then` が送出した BASIC のエラーは、その命令の行で起きたエラーとして扱う（`ON ERROR` で捕まえられる）。HTTP 命令は、裏のスレッドの結果を DICT に入れる処理と通信エラーの報告にこれを使う。
 - 標準関数（`stdlib/standard_functions.py`）も、フロントエンドの命令（Pyxel 版の描画命令など）も同じ API で登録する（特別扱いしない）。
 - 命令名は予約語と同じ扱いになるため、プログラムの解析より前に登録する。
 
@@ -175,6 +175,9 @@ class Host(Protocol):
 
 ## 11. 標準関数（stdlib/）と文字画面のモデル（terminal/）
 - `stdlib/`: 標準関数（[BASIC.md](BASIC.md) 6 章）を、拡張 API（8）と同じ `register_function` で登録する。`install_standard(runtime)` で一度に登録できる。
+- `stdlib/http.py`: HTTP 命令と `HTTPSTATUS()` / `HTTPBODY$()`（[BASIC.md](BASIC.md) 6.1）。プログラムがネットワークを使えるようになるため `install_standard` には含めず、使うアプリが `install_http(runtime, timeout=10)` で登録する。標準ライブラリの `urllib` / `json` / `threading` だけを使う。
+  - リクエストは裏のスレッドで行い、命令は `WaitUntil(ready, then)` を返して待つ（協調実行を止めない）。結果（ステータス・本文）はスレッドが記録し、DICT への書き込みとエラーの送出は `then` が主スレッドで行う（DICT をスレッドから触らない）。
+  - 送るデータ: `nest()` がキーの `.` で入れ子にして JSON にする（フォーム形式・クエリは `urlencode`）。受けたデータ: `flatten()` が JSON を `a.0.b` 形式のキーと文字列の値に平らにする（配列の要素数は `.#`）。
 - `terminal/`: 画面を持つフロントエンドが共通で使える、文字画面のモデル。描画手段を持たない。
   - `TerminalBuffer`: 文字セル（全角は 2 セル）・カーソル・行末での折り返し（次の文字を書くときに折り返す）・スクロール。文字の幅は外から関数で与えられる（既定は Unicode の文字幅。フロントエンドはフォントの実際の幅を渡せる）。
   - `LineEditor`: 入力中の 1 行の編集（カーソル移動・削除）と入力履歴。
@@ -185,7 +188,7 @@ class Host(Protocol):
 
 ## 13. テスト
 - `tests/` を pytest で実行する（リポジトリのフォルダで `python -m pytest`）。`tests/conftest.py` がリポジトリのフォルダを `sys.path` に入れ、`py_basic_core` を import できるようにする。
-- `test_language.py`: 言語仕様（BASIC.md の例を含む）。`test_runtime.py`: 拡張 API・中断と再開・WAIT・イベント（14）・ダイレクト実行・依存の規則。`test_terminal.py`: 文字画面のモデル。
+- `test_language.py`: 言語仕様（BASIC.md の例を含む）。`test_runtime.py`: 拡張 API・中断と再開・WAIT・イベント（14）・ダイレクト実行・依存の規則。`test_terminal.py`: 文字画面のモデル。`test_http.py`: HTTP 命令（テストの中で起動するローカルのサーバを相手にする）。
 
 ## 14. イベント（フロントエンドから関数を呼ぶ）
 GUI のボタンのクリックなど、プログラムの外で起きたことを BASIC の関数で処理するための API。文法は変えず、フロントエンド（Pyxel 版の GUI など）が使う。

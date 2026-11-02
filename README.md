@@ -14,6 +14,7 @@
 - 1 回に実行する命令数を決めて少しずつ実行できる（ゲームのフレームに合わせて動かせる。`INPUT` や待機命令で止めて再開できる）
 - Python から命令・関数を追加できる（画面・入力の命令はフロントエンドが追加する）
 - ダイレクト実行（REPL）、文字画面のモデル（全角対応の文字セル・折り返し・スクロール・入力行の編集）
+- HTTP / HTTPS のリクエスト（`HTTP` 命令。送る・受けるデータは DICT、JSON はパースして受け取る。使うアプリが `install_http(runtime)` で追加する）
 
 ## 使い方
 
@@ -33,6 +34,7 @@ from py_basic_core import BufferHost, Runtime, RunState, install_standard
 host = BufferHost()                 # PRINT の出力を文字列にためる
 runtime = Runtime(host)
 install_standard(runtime)           # ABS / LEFT$ / RND などの標準関数
+# install_http(runtime)             # HTTP 命令も使うとき（ネットワークを使う）
 
 # Python から関数を追加する
 runtime.register_function("TWICE", lambda ctx, args: ctx.expect_int(args[0]) * 2, 1, 1)

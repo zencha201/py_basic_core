@@ -509,7 +509,6 @@ GLOBAL MAP              ' 配列も同じ書き方
 | `MID$(s$,start[,n])` | start 文字目から n 文字（n 省略時は末尾まで）。**start は 1 始まり**（従来の BASIC と同じ） | `MID$("ABCDE",2,3)` → `"BCD"` |
 | `STR$(n)` | 数値を文字列に | `STR$(-5)` → `"-5"` |
 | `VAL(s$)` | 文字列を数値に。先頭の空白を無視し、先頭の符号と数字の並びだけを読む。読めなければ 0 | `VAL("12AB")` → 12 |
-
 | `RND(n)` | 0〜n-1 の乱数（n は 1 以上） | `RND(6)+1` → 1〜6 |
 | `CHR$(n)` | 文字コード n の文字 | `CHR$(65)` → `"A"` |
 | `ASC(s$)` | 先頭の文字の文字コード（空文字列はエラー） | `ASC("A")` → 65 |
@@ -521,6 +520,44 @@ GLOBAL MAP              ' 配列も同じ書き方
 | `ERL()` | `ON ERROR` で捕まえたエラーの行番号（まだなければ 0） | `ERL()` → 12 |
 
 - 引数の個数・型が合わなければ実行時エラー（`ARGUMENT COUNT MISMATCH` / `TYPE MISMATCH`）。LEFT$ などで n が負なら `ILLEGAL FUNCTION CALL`、文字数を超える n は末尾までとする。
+
+### 6.1 HTTP / HTTPS のリクエスト（HTTP 命令）
+Web の API などに HTTP / HTTPS でリクエストを送り、返ってきた JSON を DICT で受け取る。
+アプリが `install_http(runtime)` で登録したときだけ使える（ネットワークを使うため、`install_standard` には含めない。[DESIGN.md](DESIGN.md) 8）。
+
+```basic
+DICT REQ$, RES$
+REQ$("name") = "TARO"
+REQ$("profile.age") = "20"        ' "." で入れ子: {"name":"TARO","profile":{"age":"20"}}
+HTTP "POST", URL$, REQ$, RES$
+IF HTTPSTATUS() = 200 THEN PRINT RES$("user.id"); " "; RES$("items.#")
+```
+
+| 命令・関数 | 説明 |
+|---|---|
+| `HTTP method$, url$, data, reply$[, headers$]` | リクエストを送り、返事が来るまで待つ（待つ間も画面は動き、中断できる） |
+| `HTTPSTATUS()` | 直前の `HTTP` のステータスコード（200、404 など。まだなければ 0、通信できなかったときも 0） |
+| `HTTPBODY$()` | 直前の `HTTP` の返事の本文そのまま（JSON でないときなど） |
+
+- **method$**: `GET` `POST` `PUT` `PATCH` `DELETE` `HEAD` など（大文字・小文字は問わない）。英字以外を含むと `ILLEGAL FUNCTION CALL`。
+- **url$**: `http://` か `https://` で始まる URL。それ以外（`""` を含む）は `ILLEGAL FUNCTION CALL`。
+- **data**（送るデータ）: DICT か、送るものがなければ `""`。
+  - `GET` `DELETE` `HEAD` では URL のクエリ（`?name=TARO&page=2`）にする。
+  - それ以外では本文にする。既定は JSON。キーの `.` は入れ子のオブジェクトになる（`"a"` と `"a.b"` のように重なると `ILLEGAL FUNCTION CALL`）。値は INT の DICT なら数値、STRING の DICT なら文字列。
+  - headers$ の `Content-Type` が `application/x-www-form-urlencoded` のときは、フォーム形式（`name=TARO&memo=a%26b`。キーはそのまま）で送る。
+- **reply$**（受ける DICT）: STRING の DICT（そうでなければ `TYPE MISMATCH`）。返事が来たら中身を空にしてから、JSON のオブジェクトか配列なら、平らにして入れる。JSON でなければ空のまま。
+
+| JSON | DICT |
+|---|---|
+| `{"user":{"name":"TARO"}}` | `RES$("user.name")` = `"TARO"` |
+| `{"items":[{"id":5},{"id":7}]}` | `RES$("items.0.id")` = `"5"`、`RES$("items.1.id")` = `"7"`、`RES$("items.#")` = `"2"`（配列の要素数） |
+| 数値 / `true` `false` / `null` | `"5"` `"3.14"`（`VAL()` で INT に。小数は文字列のまま） / `"1"` `"0"` / `""` |
+| 返事全体が配列 `[...]` | `RES$("0.id")`、`RES$("#")` |
+
+- **headers$**（省略可）: 送るヘッダの STRING の DICT（`H$("Authorization") = "Bearer ..."` など）。`Content-Type`（本文が JSON のとき）と `Accept` は、指定しなければ自動で付ける。
+- **エラー**: 404 や 500 などの返事はエラーにしない（`HTTPSTATUS()` で調べる。本文が JSON なら reply$ に入る）。つながらない・タイムアウト（10 秒）・返事が大きすぎる（4MB まで）ときは `NETWORK ERROR`（`ON ERROR` で捕まえられ、`ERR$()` は `"NETWORK ERROR"`）。このとき reply$ は空になる。
+- 名前の `.` を含む JSON のキーは、入れ子と区別できない（`{"a.b":1}` も `RES$("a.b")` になる）。
+- スレッドを使えない環境（Web ブラウザなど）では `NETWORK ERROR` になる。
 
 ---
 
@@ -561,7 +598,7 @@ GLOBAL MAP              ' 配列も同じ書き方
 | 区分 | 検出時期 | 例 |
 |---|---|---|
 | 構文エラー | 実行前（解析時） | `SYNTAX ERROR`、`UNTERMINATED STRING`、`UNDEFINED LABEL`、`DUPLICATE LABEL`、`DUPLICATE FUNCTION`、`IF WITHOUT ENDIF`、`ENDIF WITHOUT IF`、`ELSE WITHOUT IF`、`ELSIF WITHOUT IF`、`FOR WITHOUT NEXT`、`NEXT WITHOUT FOR`、`WHILE WITHOUT WEND`、`WEND WITHOUT WHILE`、`FUNCTION WITHOUT END FUNCTION`、`END FUNCTION WITHOUT FUNCTION`、`EXIT FOR WITHOUT FOR`、`EXIT WHILE WITHOUT WHILE`、`CONTINUE WITHOUT LOOP`、`CONTINUE FOR WITHOUT FOR`、`CONTINUE WHILE WITHOUT WHILE`、`SELECT WITHOUT END SELECT`、`CASE WITHOUT SELECT`、`END SELECT WITHOUT SELECT`、`NOT ALLOWED IN DIRECT MODE` |
-| 実行時エラー | 実行中 | `TYPE MISMATCH`、`DIVISION BY ZERO`、`SUBSCRIPT OUT OF RANGE`、`UNDEFINED ARRAY`、`UNDEFINED FUNCTION`、`ARGUMENT COUNT MISMATCH`、`ILLEGAL FUNCTION CALL`、`FILE NOT FOUND`、`OUT OF DATA`、`REDIM`、`ARRAY AND VARIABLE NAME CONFLICT`、`STACK OVERFLOW`、`RETURN WITHOUT GOSUB`、`NEXT WITHOUT FOR`（GOTO でループの途中に飛び込んだ場合）、`STEP IS ZERO` |
+| 実行時エラー | 実行中 | `TYPE MISMATCH`、`DIVISION BY ZERO`、`SUBSCRIPT OUT OF RANGE`、`UNDEFINED ARRAY`、`UNDEFINED FUNCTION`、`ARGUMENT COUNT MISMATCH`、`ILLEGAL FUNCTION CALL`、`FILE NOT FOUND`、`OUT OF DATA`、`NETWORK ERROR`（6.1）、`REDIM`、`ARRAY AND VARIABLE NAME CONFLICT`、`STACK OVERFLOW`、`RETURN WITHOUT GOSUB`、`NEXT WITHOUT FOR`（GOTO でループの途中に飛び込んだ場合）、`STEP IS ZERO` |
 
 ### 9.2 表示
 ```

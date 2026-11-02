@@ -69,8 +69,14 @@ class WaitFrames(Suspend):
 
 @dataclass
 class WaitUntil(Suspend):
-    """Pause until ready() is true; it is checked once per Runtime.run() call."""
+    """Pause until ready() is true; it is checked once per Runtime.run() call.
+
+    then(), when given, is called once ready() is true, before the program goes
+    on. It may raise a BASIC error, which is reported at the line of the command
+    (and can be caught with ON ERROR), e.g. when a network request has failed.
+    """
     ready: Callable[[], bool]
+    then: Optional[Callable[[], None]] = None
 
 
 class CallContext:

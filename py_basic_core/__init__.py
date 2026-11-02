@@ -10,11 +10,11 @@ from .function import CallContext, Suspend, WaitFrames, WaitUntil
 from .host import BufferHost, Host
 from .repl import ReplSession
 from .runtime import Runtime, RunState
-from .stdlib import install_standard
+from .stdlib import install_http, install_standard
 
 __all__ = [
     "BasicError", "BasicRuntimeError", "BasicSyntaxError",
     "CallContext", "Suspend", "WaitFrames", "WaitUntil",
     "BufferHost", "Host", "ReplSession", "Runtime", "RunState",
-    "install_standard",
+    "install_standard", "install_http",
 ]
