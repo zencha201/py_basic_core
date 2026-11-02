@@ -15,6 +15,7 @@
 - Python から命令・関数を追加できる（画面・入力の命令はフロントエンドが追加する）
 - ダイレクト実行（REPL）、文字画面のモデル（全角対応の文字セル・折り返し・スクロール・入力行の編集）
 - HTTP / HTTPS のリクエスト（`HTTP` 命令。送る・受けるデータは DICT、JSON はパースして受け取る。使うアプリが `install_http(runtime)` で追加する）
+- DICT のファイルへの保存と読み込み（`DWRITE` / `DREAD`。形式は JSON。使うアプリが `install_dict_files(runtime, base_dir)` で追加する）
 
 ## 使い方
 
@@ -35,6 +36,7 @@ host = BufferHost()                 # PRINT の出力を文字列にためる
 runtime = Runtime(host)
 install_standard(runtime)           # ABS / LEFT$ / RND などの標準関数
 # install_http(runtime)             # HTTP 命令も使うとき（ネットワークを使う）
+# install_dict_files(runtime)       # DWRITE / DREAD も使うとき（ファイルを使う）
 
 # Python から関数を追加する
 runtime.register_function("TWICE", lambda ctx, args: ctx.expect_int(args[0]) * 2, 1, 1)

@@ -559,6 +559,35 @@ IF HTTPSTATUS() = 200 THEN PRINT RES$("user.id"); " "; RES$("items.#")
 - 名前の `.` を含む JSON のキーは、入れ子と区別できない（`{"a.b":1}` も `RES$("a.b")` になる）。
 - スレッドを使えない環境（Web ブラウザなど）では `NETWORK ERROR` になる。
 
+### 6.2 DICT のファイルへの保存と読み込み（DWRITE / DREAD）
+DICT の中身をファイルに書き出し、あとで読み戻す。ゲームのセーブデータや設定の保存などに使う。
+アプリが `install_dict_files(runtime, base_dir)` で登録したときだけ使える（ファイルを使うため、`install_standard` には含めない）。
+
+```basic
+DICT SAVE$, SCORE
+SAVE$("name") = "TARO"
+SAVE$("stage") = "3"
+SCORE("high") = 12000
+DWRITE "save.json", SAVE$          ' 書き出す
+DWRITE "score.json", SCORE
+
+DREAD "save.json", SAVE$           ' 読み込む（中身を空にしてから入れる）
+PRINT SAVE$("name"); SAVE$("stage")
+```
+
+| 命令 | 説明 |
+|---|---|
+| `DWRITE file$, d` | DICT d の中身をファイル file$ に書く（あれば上書き） |
+| `DREAD file$, d` | ファイル file$ を読んで、DICT d の中身をそれに置き換える |
+
+- **ファイル名**: 相対パスは、プログラムのファイルがあるフォルダ（アプリが `base_dir` で決める）から探す。`""` は `ILLEGAL FUNCTION CALL`。拡張子は決まっていないが、中身は JSON なので `.json` を勧める。
+- **ファイルの形式**: UTF-8 の JSON。DWRITE はキーを追加した順に、1 段のオブジェクト（`{"name": "TARO", "stage": "3"}`）として書く。値は INT の DICT なら数値、STRING の DICT なら文字列。書き込みは一時ファイルに書いてから置き換えるので、途中で止まっても元のファイルが半分だけ書き換わることはない。
+- **読み込み**: DWRITE で書いたファイルは、そのまま同じ DICT に戻る（キーの順番も同じ）。ほかで作った JSON も読め、入れ子のオブジェクトや配列は HTTP 命令の返事（6.1）と同じ規則で平らにする（`user.name`、`items.0`、要素数は `items.#`）。
+  - STRING の DICT: すべての値を文字列にする（数値は `"5"`、`true` / `false` は `"1"` / `"0"`、`null` は `""`）。
+  - INT の DICT: 数値はそのまま（小数は 0 方向に切り捨て）、`true` / `false` は 1 / 0、`null` は 0、整数の形の文字列（`"12"`）は数値にする。それ以外の文字列があれば `TYPE MISMATCH`。
+- **エラー**: ファイルがない `FILE NOT FOUND`。JSON のオブジェクトか配列でない・読めない・書けない（フォルダがないなど）・16MB を超える `ILLEGAL FUNCTION CALL`。エラーのときは DICT の中身を変えない。
+- 引数の DICT は、HASKEY などと同じく名前だけを書く（`DWRITE "a.json", SAVE$`）。
+
 ---
 
 ## 7. 画面・入力の命令（フロントエンドごと）

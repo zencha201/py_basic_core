@@ -9,7 +9,7 @@ import urllib.parse
 import pytest
 
 from py_basic_core import BufferHost, Runtime, RunState, install_http, install_standard
-from py_basic_core.stdlib.http import flatten, nest
+from py_basic_core.stdlib.dictjson import flatten, nest
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

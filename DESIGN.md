@@ -175,6 +175,8 @@ class Host(Protocol):
 
 ## 11. 標準関数（stdlib/）と文字画面のモデル（terminal/）
 - `stdlib/`: 標準関数（[BASIC.md](BASIC.md) 6 章）を、拡張 API（8）と同じ `register_function` で登録する。`install_standard(runtime)` で一度に登録できる。
+- `stdlib/dictjson.py`: DICT と JSON の変換（`nest()` / `flatten()` / `parse_json()`）。HTTP 命令と DWRITE / DREAD が同じ規則を使うために 1 か所にまとめた。
+- `stdlib/dictfile.py`: DWRITE / DREAD（[BASIC.md](BASIC.md) 6.2）。ファイルを使うため `install_standard` には含めず、使うアプリが `install_dict_files(runtime, base_dir)` で登録する（`base_dir()` は相対パスの基準のフォルダを返す関数。既定は `os.getcwd`）。書き込みは一時ファイル（`ファイル名.tmp`）に書いてから `os.replace` で置き換える。読み込みは、ファイル全体を読んで変換できてから DICT を置き換える（失敗したら DICT は元のまま）。
 - `stdlib/http.py`: HTTP 命令と `HTTPSTATUS()` / `HTTPBODY$()`（[BASIC.md](BASIC.md) 6.1）。プログラムがネットワークを使えるようになるため `install_standard` には含めず、使うアプリが `install_http(runtime, timeout=10)` で登録する。標準ライブラリの `urllib` / `json` / `threading` だけを使う。
   - リクエストは裏のスレッドで行い、命令は `WaitUntil(ready, then)` を返して待つ（協調実行を止めない）。結果（ステータス・本文）はスレッドが記録し、DICT への書き込みとエラーの送出は `then` が主スレッドで行う（DICT をスレッドから触らない）。
   - 送るデータ: `nest()` がキーの `.` で入れ子にして JSON にする（フォーム形式・クエリは `urlencode`）。受けたデータ: `flatten()` が JSON を `a.0.b` 形式のキーと文字列の値に平らにする（配列の要素数は `.#`）。
@@ -188,7 +190,7 @@ class Host(Protocol):
 
 ## 13. テスト
 - `tests/` を pytest で実行する（リポジトリのフォルダで `python -m pytest`）。`tests/conftest.py` がリポジトリのフォルダを `sys.path` に入れ、`py_basic_core` を import できるようにする。
-- `test_language.py`: 言語仕様（BASIC.md の例を含む）。`test_runtime.py`: 拡張 API・中断と再開・WAIT・イベント（14）・ダイレクト実行・依存の規則。`test_terminal.py`: 文字画面のモデル。`test_http.py`: HTTP 命令（テストの中で起動するローカルのサーバを相手にする）。
+- `test_language.py`: 言語仕様（BASIC.md の例を含む）。`test_runtime.py`: 拡張 API・中断と再開・WAIT・イベント（14）・ダイレクト実行・依存の規則。`test_terminal.py`: 文字画面のモデル。`test_http.py`: HTTP 命令（テストの中で起動するローカルのサーバを相手にする）。`test_dictfile.py`: DWRITE / DREAD（テスト用の一時フォルダを使う）。
 
 ## 14. イベント（フロントエンドから関数を呼ぶ）
 GUI のボタンのクリックなど、プログラムの外で起きたことを BASIC の関数で処理するための API。文法は変えず、フロントエンド（Pyxel 版の GUI など）が使う。

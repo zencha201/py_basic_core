@@ -22,37 +22,19 @@ import urllib.request
 
 from ..errors import ILLEGAL_FUNCTION_CALL, NETWORK_ERROR, TYPE_MISMATCH, BasicRuntimeError
 from ..function import WaitUntil
-from ..variable import BasicDict
+from .dictjson import flatten, nest, parse_json
 
 TIMEOUT = 10                    # seconds
 MAX_BYTES = 4 * 1024 * 1024     # largest reply read
 QUERY_METHODS = ("GET", "DELETE", "HEAD")
 FORM_TYPE = "application/x-www-form-urlencoded"
 JSON_TYPE = "application/json"
-COUNT_KEY = "#"                 # number of elements of a JSON array: RES$("items.#")
 
 
 # --- the data sent -----------------------------------------------------------------
 def dict_items(d):
     """(key, value) of a DICT; values of an INT DICT stay numbers."""
     return list(d.data.items())
-
-
-def nest(items):
-    """{"a.b": 1} -> {"a": {"b": 1}} (a "." in a key makes a nested object)."""
-    root = {}
-    for key, value in items:
-        parts = key.split(".")
-        node = root
-        for part in parts[:-1]:
-            child = node.setdefault(part, {})
-            if not isinstance(child, dict):
-                raise BasicRuntimeError(ILLEGAL_FUNCTION_CALL, detail="key conflict: " + key)
-            node = child
-        if isinstance(node.get(parts[-1]), dict):
-            raise BasicRuntimeError(ILLEGAL_FUNCTION_CALL, detail="key conflict: " + key)
-        node[parts[-1]] = value
-    return root
 
 
 def form_text(items):
@@ -82,41 +64,6 @@ def build_request(method, url, data, headers):
 
 
 # --- the reply ---------------------------------------------------------------------
-def flat_value(value):
-    if value is None:
-        return ""
-    if value is True or value is False:
-        return "1" if value else "0"
-    if isinstance(value, float) and value.is_integer() and abs(value) < 1e15:
-        return str(int(value))
-    return str(value)
-
-
-def flatten(value, prefix=""):
-    """Parsed JSON -> [(key, string)]: {"a": [{"b": 1}]} -> a.0.b = "1", a.# = "1"."""
-    out = []
-    if isinstance(value, dict):
-        for key, child in value.items():
-            out += flatten(child, prefix + str(key) + ".")
-    elif isinstance(value, list):
-        for i, child in enumerate(value):
-            out += flatten(child, prefix + str(i) + ".")
-        out.append((prefix + COUNT_KEY, str(len(value))))
-    elif prefix:
-        out.append((prefix[:-1], flat_value(value)))
-    return out
-
-
-def parse_json(text):
-    """The parsed JSON object or array, or None when the text is not one."""
-    if not text.lstrip()[:1] in ("{", "["):
-        return None
-    try:
-        return json.loads(text)
-    except ValueError:
-        return None
-
-
 class Request:
     """One request running in a thread. ``done`` turns True when it has finished."""
 
