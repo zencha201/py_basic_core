@@ -596,7 +596,7 @@ PRINT SAVE$("name"); SAVE$("stage")
 画面を持つフロントエンドが、拡張 API（[DESIGN.md](DESIGN.md) 8）で命令・関数を登録して提供する。
 命令名・関数名・引数の書き方は、4.11（命令拡張の文）と 6 章（関数）の規則に従う。
 
-- Pyxel 版（[pyxel_basic_runtime](https://github.com/zencha201/pyxel_basic_runtime)）の命令・関数は、[COMMANDS.md](https://github.com/zencha201/pyxel_basic_runtime/blob/main/COMMANDS.md) を参照（`CLS` `TEXT` `LINE` `PSET` `RECT` `CIRC` `LOAD` `BLT` `IMGSET` `MOUSE` `WAIT`、`PGET` `BTN` `BTNP` `INKEY$` `MOUSEX` `MOUSEY` `SCREENW` `SCREENH`）。
+- Pyxel 版（[retro_basic_runtime](https://github.com/zencha201/retro_basic_runtime)）の命令・関数は、[COMMANDS.md](https://github.com/zencha201/retro_basic_runtime/blob/main/COMMANDS.md) を参照（`CLS` `TEXT` `LINE` `PSET` `RECT` `CIRC` `LOAD` `BLT` `IMGSET` `MOUSE` `WAIT`、`PGET` `BTN` `BTNP` `INKEY$` `MOUSEX` `MOUSEY` `SCREENW` `SCREENH`）。
 
 ---
 
